@@ -1,0 +1,17 @@
+# Local agent/tooling state
+.agents/
+.tools/
+
+# Local service logs
+mysql*.log
+
+# Database dumps and backups may contain participant data
+*.sql
+backend/storage/app/backups/
+
+# Environment and OS files
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
