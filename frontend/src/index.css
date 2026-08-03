@@ -124,6 +124,52 @@ p, a, button, td, th, label, span { overflow-wrap: anywhere; }
   backdrop-filter: blur(14px);
 }
 .open9-hero-card img { border-radius: 16px; }
+.competition-detail-hero {
+  min-height: 30rem;
+  background:
+    radial-gradient(circle at 68% 22%, rgba(18, 104, 232, .34), transparent 25rem),
+    radial-gradient(circle at 25% 70%, rgba(119, 104, 246, .18), transparent 26rem),
+    linear-gradient(115deg, #0b1425 0%, #101927 48%, #090d14 100%);
+}
+.competition-detail-hero::before {
+  background:
+    linear-gradient(90deg, rgba(5, 9, 17, .32), rgba(5, 9, 17, .08) 56%, rgba(5, 9, 17, .38)),
+    linear-gradient(180deg, rgba(255,255,255,.035), transparent 45%, rgba(0,0,0,.3));
+}
+.competition-detail-copy {
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 28px;
+  background: linear-gradient(135deg, rgba(5, 12, 24, .88), rgba(11, 23, 42, .68));
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, .36), inset 0 1px rgba(255, 255, 255, .06);
+  backdrop-filter: blur(16px);
+}
+.competition-detail-copy::before {
+  content: "";
+  position: absolute;
+  top: 1.5rem;
+  bottom: 1.5rem;
+  left: 0;
+  width: 4px;
+  border-radius: 0 99px 99px 0;
+  background: linear-gradient(#2f8cff, #1268e8);
+  box-shadow: 0 0 24px rgba(18, 104, 232, .8);
+}
+.competition-detail-back { color: rgba(255, 255, 255, .66); }
+.competition-detail-back:hover { color: #7db2ff; }
+.competition-detail-badge {
+  background: #1268e8;
+  color: #fff;
+  box-shadow: 0 10px 30px rgba(18, 104, 232, .35);
+}
+.competition-detail-title {
+  color: #fff;
+  text-shadow: 0 4px 30px rgba(0, 0, 0, .7);
+}
+.competition-detail-description { color: rgba(255, 255, 255, .78); }
+.competition-detail-meta { color: rgba(255, 255, 255, .72); }
+.competition-detail-meta svg { color: #4b96ff; }
 .open9-kicker {
   display: inline-flex;
   align-items: center;
@@ -205,6 +251,19 @@ p, a, button, td, th, label, span { overflow-wrap: anywhere; }
 }
 .open9-filter .input option { background: #272727; color: #fff; }
 .open9-detail-body { background: #f4f4f1; color: #161616; }
+.competition-payment-card {
+  color: #fff;
+  box-shadow: 0 24px 65px rgba(15, 23, 42, .25);
+}
+.competition-payment-label { color: rgba(255, 255, 255, .68); }
+.competition-payment-amount {
+  color: #fff;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, .45);
+}
+.competition-payment-divider { background: rgba(255, 255, 255, .16); }
+.competition-payment-deadline { color: rgba(255, 255, 255, .7); }
+.competition-payment-deadline b { color: #fff; text-align: right; }
+.competition-payment-closed { background: rgba(255, 255, 255, .1); color: rgba(255, 255, 255, .62); }
 .landing-showcase {
   position: relative;
   min-height: calc(100vh - 6rem);
@@ -1145,6 +1204,23 @@ html[data-theme="light"] .open9-public [class*="border-white/"] { border-color: 
 html[data-theme="light"] .open9-public [class*="bg-white/"] { background-color: rgba(22,22,22,.055); }
 html[data-theme="light"] .open9-public .text-electric,
 html[data-theme="light"] .open9-public .open9-kicker { color: #0b55bd; }
+
+html[data-theme="light"] .open9-public .competition-detail-hero,
+html[data-theme="light"] .open9-public .competition-detail-title {
+  color: #fff !important;
+}
+html[data-theme="light"] .open9-public .competition-detail-back { color: rgba(255, 255, 255, .66) !important; }
+html[data-theme="light"] .open9-public .competition-detail-back:hover { color: #9bc5ff !important; }
+html[data-theme="light"] .open9-public .competition-detail-badge { background: #1268e8; color: #fff !important; }
+html[data-theme="light"] .open9-public .competition-detail-description { color: rgba(255, 255, 255, .78) !important; }
+html[data-theme="light"] .open9-public .competition-detail-meta { color: rgba(255, 255, 255, .72) !important; }
+html[data-theme="light"] .open9-public .competition-detail-meta svg { color: #74a9ff !important; }
+html[data-theme="light"] .open9-public .competition-payment-card,
+html[data-theme="light"] .open9-public .competition-payment-amount,
+html[data-theme="light"] .open9-public .competition-payment-deadline b { color: #fff !important; }
+html[data-theme="light"] .open9-public .competition-payment-label,
+html[data-theme="light"] .open9-public .competition-payment-deadline { color: rgba(255, 255, 255, .7) !important; }
+html[data-theme="light"] .open9-public .competition-payment-closed { color: rgba(255, 255, 255, .62) !important; }
 
 html[data-theme="light"] .landing-showcase {
   background:

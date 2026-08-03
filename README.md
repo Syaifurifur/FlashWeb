@@ -56,6 +56,11 @@ Setiap perubahan fitur, skema database, API, hak akses, atau alur pengguna wajib
 
 ## Changelog
 
+- Mengganti menu Informasi menjadi Download Dokumen dan menambahkan halaman publik yang otomatis menampilkan serta mengunduh dokumen global hasil unggahan admin.
+- Mengganti kontak email pada footer menjadi tautan resmi `www.bsi.ac.id` yang terbuka di tab baru.
+- Memperjelas warna teks kartu pembayaran detail lomba agar nominal, label, dan batas pendaftaran tetap kontras di atas background gelap pada light maupun dark mode.
+- Mengembalikan pengaturan rekening pembayaran pada formulir lomba multi-kota; rekening selalu dapat diisi dan otomatis wajib ketika salah satu kota menetapkan biaya pendaftaran.
+- Memperjelas hero detail lomba dengan panel background gelap berlapis, aksen biru, serta warna teks dan metadata yang tetap kontras pada light maupun dark mode.
 - Menambahkan manajemen Tahun Pelaksanaan dengan edisi aktif, draft, dan arsip; pemilih tahun pada panel; isolasi seluruh data operasional; snapshot pemenang; serta proses duplikasi konfigurasi untuk tahun berikutnya dengan pergeseran tanggal otomatis.
 - Mengubah feature lomba pada hero menjadi slider manual berisi lomba dengan pendaftaran aktif saja, tanpa duplikasi kartu, lengkap dengan tombol navigasi, indikator, keyboard, dan gestur geser di layar sentuh.
 - Menambahkan pengelolaan testimoni pada panel konten dan slider testimoni responsif di landing page, lengkap dengan foto, identitas, status aktif, urutan, navigasi, serta durasi perpindahan otomatis.
