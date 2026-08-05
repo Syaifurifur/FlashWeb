@@ -56,6 +56,7 @@ Setiap perubahan fitur, skema database, API, hak akses, atau alur pengguna wajib
 
 ## Changelog
 
+- Mengubah pelengkapan data tim besar menjadi proses bertahap: data teks disimpan lebih dahulu, kemudian dokumen diunggah per anggota secara berurutan dengan indikator progres dan dukungan coba lagi tanpa mengulang upload yang sudah berhasil.
 - Mengganti menu Informasi menjadi Download Dokumen dan menambahkan halaman publik yang otomatis menampilkan serta mengunduh dokumen global hasil unggahan admin.
 - Mengganti kontak email pada footer menjadi tautan resmi `www.bsi.ac.id` yang terbuka di tab baru.
 - Memperjelas warna teks kartu pembayaran detail lomba agar nominal, label, dan batas pendaftaran tetap kontras di atas background gelap pada light maupun dark mode.

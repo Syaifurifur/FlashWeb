@@ -794,6 +794,67 @@ class EventManagementTest extends TestCase
         $this->assertNotNull($registration->statement_letter_path);
     }
 
+    public function test_team_documents_can_be_uploaded_per_member_and_resumed(): void
+    {
+        Storage::fake('public');
+        $competition = $this->competition();
+        $competition->update([
+            'participation_type'=>'team',
+            'team_size'=>2,
+            'team_update_deadline_at'=>now()->addDay(),
+        ]);
+
+        $this->postJson('/api/registrations', [
+            'competition_id'=>$competition->id,
+            'full_name'=>'Ketua Upload Bertahap',
+            'email'=>'ketua-upload@test.id',
+            'whatsapp'=>'081234567880',
+            'password'=>'password123',
+            'password_confirmation'=>'password123',
+            'consent'=>true,
+        ])->assertCreated();
+
+        $registration = Registration::firstOrFail();
+        $user = User::where('email','ketua-upload@test.id')->firstOrFail();
+        $user->update(['api_token'=>hash('sha256','member-upload-token')]);
+
+        $this->withToken('member-upload-token')->postJson('/api/participant/registrations/'.$registration->id.'/team', [
+            'team_name'=>'Tim Upload Bertahap',
+            'members'=>[
+                ['full_name'=>'Ketua Upload Bertahap','email'=>'ketua-upload@test.id','whatsapp'=>'081234567880','nisn'=>'8876543210','birth_place'=>'Jakarta','birth_date'=>'2009-01-01','grade'=>'XI','mother_name'=>'Ibu Ketua'],
+                ['full_name'=>'Anggota Upload Bertahap','email'=>'anggota-upload@test.id','whatsapp'=>'081234567881','nisn'=>'8876543211','birth_place'=>'Depok','birth_date'=>'2009-02-01','grade'=>'X','mother_name'=>'Ibu Anggota'],
+            ],
+            'school_name'=>'SMA Upload Bertahap',
+            'school_city'=>'Jakarta',
+            'school_address'=>'Jl. Pendidikan No. 1',
+            'teacher_name'=>'Guru Upload',
+            'teacher_contact'=>'081298765430',
+        ])->assertOk()->assertJsonPath('registration.team_completed_at', null);
+
+        $members = $registration->fresh()->members()->orderBy('member_order')->get();
+        $this->assertCount(2, $members);
+
+        $firstUpload = $this->withToken('member-upload-token')->post('/api/participant/registrations/'.$registration->id.'/members/'.$members[0]->id.'/documents', [
+            'student_card'=>UploadedFile::fake()->create('kartu-ketua.pdf',100,'application/pdf'),
+            'photo'=>UploadedFile::fake()->create('foto-ketua.jpg',100,'image/jpeg'),
+        ]);
+        $firstUpload->assertOk()
+            ->assertJsonPath('uploaded_members', 1)
+            ->assertJsonPath('total_members', 2)
+            ->assertJsonPath('team_completed', false);
+        $this->assertNull($registration->fresh()->team_completed_at);
+
+        $secondUpload = $this->withToken('member-upload-token')->post('/api/participant/registrations/'.$registration->id.'/members/'.$members[1]->id.'/documents', [
+            'student_card'=>UploadedFile::fake()->create('kartu-anggota.pdf',100,'application/pdf'),
+            'photo'=>UploadedFile::fake()->create('foto-anggota.jpg',100,'image/jpeg'),
+        ]);
+        $secondUpload->assertOk()
+            ->assertJsonPath('uploaded_members', 2)
+            ->assertJsonPath('total_members', 2)
+            ->assertJsonPath('team_completed', true);
+        $this->assertNotNull($registration->fresh()->team_completed_at);
+    }
+
     public function test_admin_can_manage_multiple_location_sessions_for_one_competition(): void
     {
         User::create(['name'=>'Admin Lokasi','email'=>'lokasi-admin@test.id','password'=>'password123','role'=>'super_admin','api_token'=>hash('sha256','lokasi-admin-token')]);

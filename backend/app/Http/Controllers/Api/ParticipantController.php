@@ -25,6 +25,20 @@ class ParticipantController extends Controller
         return $registration;
     }
 
+    private function syncTeamCompletion(Registration $registration): bool
+    {
+        $registration->loadMissing('competition');
+        $members = $registration->members()->get();
+        $complete = $members->count() === (int) $registration->competition->team_size
+            && $members->every(fn (RegistrationMember $member) => $member->student_card_path && $member->photo_path);
+
+        $registration->update([
+            'team_completed_at'=>$complete ? ($registration->team_completed_at ?? now()) : null,
+        ]);
+
+        return $complete;
+    }
+
     public function index(Request $request)
     {
         return $request->user()->registrations()->with($this->relations)->latest()->get()
@@ -120,9 +134,8 @@ class ParticipantController extends Controller
 
         if ($isTeam) {
             foreach (range(0, $competition->team_size - 1) as $index) {
-                $member = $registration->members->firstWhere('member_order', $index + 1);
-                $rules["member_student_cards.$index"] = [Rule::requiredIf(! $member?->student_card_path),'nullable','file','mimes:jpg,jpeg,png,pdf,doc,docx','max:2048'];
-                $rules["member_photos.$index"] = [Rule::requiredIf(! $member?->photo_path),'nullable','file','mimes:jpg,jpeg,png','max:2048'];
+                $rules["member_student_cards.$index"] = ['nullable','file','mimes:jpg,jpeg,png,pdf,doc,docx','max:2048'];
+                $rules["member_photos.$index"] = ['nullable','file','mimes:jpg,jpeg,png','max:2048'];
             }
         }
 
@@ -162,7 +175,7 @@ class ParticipantController extends Controller
                 }
             }
             $registration->update($shared + [
-                'team_completed_at'=>now(),
+                'team_completed_at'=>$isTeam ? null : now(),
                 'status'=>'pending',
                 'review_note'=>null,
                 'reviewed_by'=>null,
@@ -171,8 +184,63 @@ class ParticipantController extends Controller
             $request->user()->update(['name'=>$registration->fresh()->full_name]);
         });
 
+        if ($isTeam) $this->syncTeamCompletion($registration);
+
         return response()->json([
-            'message'=>'Data peserta dan tim berhasil disimpan.',
+            'message'=>$isTeam && ! $registration->fresh()->team_completed_at
+                ? 'Data tim berhasil disimpan. Lanjutkan upload dokumen setiap anggota.'
+                : 'Data peserta dan tim berhasil disimpan.',
+            'registration'=>$this->revealOwnedData($registration->fresh($this->relations)),
+        ]);
+    }
+
+    public function uploadMemberDocuments(Request $request, Registration $registration, RegistrationMember $registrationMember)
+    {
+        abort_unless($registration->user_id === $request->user()->id, 403);
+        abort_unless($registrationMember->registration_id === $registration->id, 404);
+        $registration->load('competition', 'competitionSession');
+        abort_unless($registration->competition->participation_type === 'team', 422, 'Upload per anggota hanya tersedia untuk pendaftaran tim.');
+
+        $completionDeadline = $registration->competitionSession?->team_update_deadline_at
+            ?? $registration->competition->team_update_deadline_at;
+        if (! $completionDeadline) {
+            return response()->json(['message'=>'Batas waktu pembaruan data belum ditetapkan PIC.'], 422);
+        }
+        if (now()->gt($completionDeadline)) {
+            return response()->json(['message'=>'Batas waktu pembaruan data tim telah berakhir.'], 403);
+        }
+
+        $request->validate([
+            'student_card'=>[Rule::requiredIf(! $registrationMember->student_card_path),'nullable','file','mimes:jpg,jpeg,png,pdf,doc,docx','max:2048'],
+            'photo'=>[Rule::requiredIf(! $registrationMember->photo_path),'nullable','file','mimes:jpg,jpeg,png','max:2048'],
+        ]);
+
+        $updates = [];
+        if ($request->hasFile('student_card')) {
+            $updates['student_card_path'] = $request->file('student_card')->store('registrations/'.$registration->competition_id.'/members','public');
+            $updates['nisn_verified_at'] = null;
+            $updates['nisn_verified_by'] = null;
+        }
+        if ($request->hasFile('photo')) {
+            $updates['photo_path'] = $request->file('photo')->store('registrations/'.$registration->competition_id.'/members','public');
+        }
+        if ($updates) $registrationMember->update($updates);
+
+        if ($registrationMember->member_order === 1) {
+            $registration->update([
+                'student_card_path'=>$registrationMember->fresh()->student_card_path,
+                'photo_path'=>$registrationMember->fresh()->photo_path,
+            ]);
+        }
+
+        $complete = $this->syncTeamCompletion($registration);
+        $uploadedMembers = $registration->members()->whereNotNull('student_card_path')->whereNotNull('photo_path')->count();
+
+        return response()->json([
+            'message'=>$complete ? 'Seluruh dokumen anggota berhasil diunggah.' : 'Dokumen anggota berhasil diunggah.',
+            'uploaded_members'=>$uploadedMembers,
+            'total_members'=>(int) $registration->competition->team_size,
+            'team_completed'=>$complete,
             'registration'=>$this->revealOwnedData($registration->fresh($this->relations)),
         ]);
     }
