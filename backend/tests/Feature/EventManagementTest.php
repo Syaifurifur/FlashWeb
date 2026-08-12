@@ -77,6 +77,21 @@ class EventManagementTest extends TestCase
         ]);
     }
 
+    public function test_initial_registration_requires_school_name(): void
+    {
+        $competition = $this->competition();
+
+        $this->postJson('/api/registrations', [
+            'competition_id'=>$competition->id,
+            'full_name'=>'Peserta Tanpa Sekolah',
+            'whatsapp'=>'081234567890',
+            'email'=>'tanpa-sekolah@test.id',
+            'password'=>'password123',
+            'password_confirmation'=>'password123',
+            'consent'=>true,
+        ])->assertUnprocessable()->assertJsonValidationErrors('school_name');
+    }
+
     public function test_pic_and_super_admin_can_see_mother_name_for_validation(): void
     {
         $competition = $this->competition();
@@ -588,10 +603,28 @@ class EventManagementTest extends TestCase
         $other = $assigned->replicate();
         $other->title = 'Lomba Lain'; $other->slug = 'lomba-lain'; $other->save();
         User::create(['name'=>'PIC','email'=>'pic@test.id','password'=>'password123','role'=>'pic','competition_id'=>$assigned->id,'api_token'=>hash('sha256','pic-format-token')]);
+        $registration = Registration::create([
+            'competition_id'=>$assigned->id,
+            'ticket_code'=>'BSIFLASH-FORMAT01',
+            'full_name'=>'Peserta Format',
+            'email'=>'peserta-format@test.id',
+            'whatsapp'=>'081234567890',
+            'birth_place'=>'Bandung',
+            'birth_date'=>'2009-01-01',
+            'grade'=>'XI',
+            'nisn'=>'1234567890',
+            'mother_name'=>'Ibu Peserta',
+            'school_name'=>'SMA Format',
+            'student_card_path'=>'kartu.pdf',
+            'photo_path'=>'foto.jpg',
+            'consent'=>true,
+            'team_completed_at'=>now(),
+        ]);
 
         $this->withToken('pic-format-token')->patchJson('/api/manage/competitions/'.$assigned->id.'/format', [
             'participation_type'=>'team', 'team_size'=>4, 'official_count'=>2,
         ])->assertOk()->assertJsonPath('team_size', 4)->assertJsonPath('official_count', 2);
+        $this->assertNull($registration->fresh()->team_completed_at);
         $this->withToken('pic-format-token')->patchJson('/api/manage/competitions/'.$other->id.'/format', [
             'participation_type'=>'team', 'team_size'=>3, 'official_count'=>1,
         ])->assertForbidden();
@@ -742,6 +775,7 @@ class EventManagementTest extends TestCase
         $this->postJson('/api/registrations', [
             'competition_id'=>$competition->id,
             'full_name'=>'Perwakilan Bertahap',
+            'school_name'=>'SMA Bertahap',
             'email'=>'bertahap@test.id',
             'whatsapp'=>'081234567890',
             'password'=>'password123',
@@ -807,6 +841,7 @@ class EventManagementTest extends TestCase
         $this->postJson('/api/registrations', [
             'competition_id'=>$competition->id,
             'full_name'=>'Ketua Upload Bertahap',
+            'school_name'=>'SMA Upload Bertahap',
             'email'=>'ketua-upload@test.id',
             'whatsapp'=>'081234567880',
             'password'=>'password123',
@@ -1028,7 +1063,7 @@ class EventManagementTest extends TestCase
         ]);
         $payload = [
             'competition_id'=>$competition->id,'full_name'=>'Peserta Lokasi','whatsapp'=>'081234567890',
-            'email'=>'peserta-lokasi@test.id','password'=>'password123','password_confirmation'=>'password123','consent'=>true,
+            'email'=>'peserta-lokasi@test.id','school_name'=>'SMA Lokasi','password'=>'password123','password_confirmation'=>'password123','consent'=>true,
         ];
 
         $this->postJson('/api/registrations', $payload)

@@ -30,7 +30,19 @@ class ParticipantController extends Controller
         $registration->loadMissing('competition');
         $members = $registration->members()->get();
         $complete = $members->count() === (int) $registration->competition->team_size
-            && $members->every(fn (RegistrationMember $member) => $member->student_card_path && $member->photo_path);
+            && $members->every(fn (RegistrationMember $member) =>
+                $member->full_name
+                && $member->email
+                && $member->whatsapp
+                && $member->nisn
+                && $member->birth_place
+                && $member->birth_date
+                && $member->grade
+                && $member->mother_name
+                && $member->student_card_path
+                && $member->photo_path
+            )
+            && $registration->officials()->count() === (int) $registration->competition->official_count;
 
         $registration->update([
             'team_completed_at'=>$complete ? ($registration->team_completed_at ?? now()) : null,

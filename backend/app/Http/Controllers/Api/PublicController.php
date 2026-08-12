@@ -49,7 +49,7 @@ class PublicController extends Controller
             'grade'=>'nullable|in:X,XI,XII',
             'nisn'=>['nullable','regex:/^[0-9]{10}$/'],
             'mother_name'=>'nullable|string|max:120',
-            'school_name'=>'nullable|string|max:180',
+            'school_name'=>'required|string|max:180',
             'school_city'=>'nullable|string|max:120',
             'school_address'=>'nullable|string|max:1000',
             'teacher_name'=>'nullable|string|max:120',

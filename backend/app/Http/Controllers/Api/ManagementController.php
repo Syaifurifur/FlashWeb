@@ -491,11 +491,43 @@ class ManagementController extends Controller
         ]);
         $data['team_size'] = $data['participation_type'] === 'individual' ? 1 : $data['team_size'];
         $data['official_count'] = $data['participation_type'] === 'individual' ? 0 : $data['official_count'];
-        if ($competition->registrations()->exists() && ($competition->participation_type !== $data['participation_type'] || $competition->team_size !== $data['team_size'] || $competition->official_count !== $data['official_count'])) {
-            return response()->json(['message'=>'Format tidak dapat diubah karena lomba sudah memiliki pendaftar.'], 422);
-        }
-        $competition->update($data);
-        return $competition;
+        DB::transaction(function () use ($competition, $data) {
+            $competition->update($data);
+
+            $competition->registrations()->with(['members', 'officials'])->get()->each(function (Registration $registration) use ($data) {
+                if ($data['participation_type'] === 'individual') {
+                    $complete = $registration->full_name
+                        && $registration->nisn
+                        && $registration->birth_place
+                        && $registration->birth_date
+                        && $registration->grade
+                        && $registration->mother_name
+                        && $registration->student_card_path
+                        && $registration->photo_path;
+                } else {
+                    $complete = $registration->members->count() === $data['team_size']
+                        && $registration->members->every(fn (RegistrationMember $member) =>
+                            $member->full_name
+                            && $member->email
+                            && $member->whatsapp
+                            && $member->nisn
+                            && $member->birth_place
+                            && $member->birth_date
+                            && $member->grade
+                            && $member->mother_name
+                            && $member->student_card_path
+                            && $member->photo_path
+                        )
+                        && $registration->officials->count() === $data['official_count'];
+                }
+
+                $registration->update([
+                    'team_completed_at'=>$complete ? ($registration->team_completed_at ?? now()) : null,
+                ]);
+            });
+        });
+
+        return $competition->fresh();
     }
 
     public function review(Request $request, Registration $registration)
