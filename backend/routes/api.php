@@ -110,9 +110,10 @@ Route::middleware('api.auth')->group(function () {
     });
 
     Route::middleware('permission:competitions.manage')->group(function () {
-        Route::post('/manage/venues', [VenueController::class, 'store']);
-        Route::put('/manage/venues/{venue}', [VenueController::class, 'update']);
-        Route::delete('/manage/venues/{venue}', [VenueController::class, 'destroy']);
+         Route::post('/manage/venues', [VenueController::class, 'store']);
+         Route::put('/manage/venues/{venue}', [VenueController::class, 'update']);
+         Route::put('/manage/venues/{venue}/staff-assignments', [VenueController::class, 'updateStaffAssignments']);
+         Route::delete('/manage/venues/{venue}', [VenueController::class, 'destroy']);
         Route::post('/manage/competition-types', [CompetitionTypeController::class, 'store']);
         Route::put('/manage/competition-types/{competitionType}', [CompetitionTypeController::class, 'update']);
         Route::delete('/manage/competition-types/{competitionType}', [CompetitionTypeController::class, 'destroy']);

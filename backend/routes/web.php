@@ -3,5 +3,5 @@
 use Illuminate\Support\Facades\Route;
 
 Route::get('/{path?}', function () {
-    return response()->file(base_path('../frontend/dist/index.html'));
+    return response()->file(public_path('index.html'));
 })->where('path', '^(?!api(?:/|$)).*');
