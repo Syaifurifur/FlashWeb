@@ -65,9 +65,9 @@ class VenueController extends Controller
             'assignments.*.pic_slots'=>'required|integer|min:1|max:10',
             'assignments.*.supervisor_slots'=>'required|integer|min:1|max:10',
             'assignments.*.pic_ids'=>'required|array|min:1|max:10',
-            'assignments.*.pic_ids.*'=>'required|integer|distinct|exists:users,id',
+            'assignments.*.pic_ids.*'=>'required|integer|exists:users,id',
             'assignments.*.supervisor_ids'=>'required|array|min:1|max:10',
-            'assignments.*.supervisor_ids.*'=>'required|integer|distinct|exists:users,id',
+            'assignments.*.supervisor_ids.*'=>'required|integer|exists:users,id',
         ]);
 
         return DB::transaction(function () use ($data, $venue) {
@@ -79,8 +79,8 @@ class VenueController extends Controller
                 $supervisorIds = collect($assignment['supervisor_ids'])->map(fn ($id) => (int) $id)->unique()->values();
                 abort_unless($picIds->count() === (int) $assignment['pic_slots'], 422, 'Jumlah PIC terpilih harus sama dengan jumlah slot PIC.');
                 abort_unless($supervisorIds->count() === (int) $assignment['supervisor_slots'], 422, 'Jumlah SPV terpilih harus sama dengan jumlah slot SPV.');
-                abort_unless(User::whereIn('id', $picIds)->where('role', 'pic')->count() === $picIds->count(), 422, 'Seluruh petugas PIC harus menggunakan akun PIC.');
-                abort_unless(User::whereIn('id', $supervisorIds)->where('role', 'spv')->count() === $supervisorIds->count(), 422, 'Seluruh petugas SPV harus menggunakan akun SPV.');
+                abort_unless(User::whereIn('id', $picIds)->where('role', 'pic')->where('is_active', true)->whereNotNull('whatsapp')->count() === $picIds->count(), 422, 'Seluruh petugas PIC harus menggunakan akun PIC aktif dengan nomor WhatsApp.');
+                abort_unless(User::whereIn('id', $supervisorIds)->where('role', 'spv')->where('is_active', true)->whereNotNull('whatsapp')->count() === $supervisorIds->count(), 422, 'Seluruh petugas SPV harus menggunakan akun SPV aktif dengan nomor WhatsApp.');
 
                 $session->update([
                     'pic_user_id'=>$picIds->first(),

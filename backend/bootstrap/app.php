@@ -4,8 +4,10 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use App\Http\Middleware\ApiTokenAuth;
+use App\Http\Middleware\NormalizeApiErrors;
 use App\Http\Middleware\RoleMiddleware;
 use App\Http\Middleware\PermissionMiddleware;
+use App\Support\ApiErrorResponse;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
@@ -25,19 +27,33 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => RoleMiddleware::class,
             'permission' => PermissionMiddleware::class,
         ]);
+        $middleware->appendToGroup('api', NormalizeApiErrors::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $isApi = fn (Request $request): bool => $request->is('api/*') || $request->expectsJson();
 
         $exceptions->render(function (ModelNotFoundException $exception, Request $request) use ($isApi) {
             if ($isApi($request)) {
-                return response()->json(['message' => 'Data yang dicari tidak ditemukan.'], 404);
+                return ApiErrorResponse::make($request, 'Data yang dicari tidak ditemukan.', 404, 'DATA_NOT_FOUND', exception: $exception);
             }
         });
 
         $exceptions->render(function (AuthorizationException $exception, Request $request) use ($isApi) {
             if ($isApi($request)) {
-                return response()->json(['message' => 'Anda tidak memiliki izin untuk melakukan tindakan ini.'], 403);
+                return ApiErrorResponse::make($request, 'Anda tidak memiliki izin untuk melakukan tindakan ini.', 403, 'ACCESS_DENIED', exception: $exception);
+            }
+        });
+
+        $exceptions->render(function (ValidationException $exception, Request $request) use ($isApi) {
+            if ($isApi($request)) {
+                return ApiErrorResponse::make(
+                    $request,
+                    'Data belum dapat diproses. Periksa kolom yang ditandai.',
+                    422,
+                    'VALIDATION_ERROR',
+                    $exception->errors(),
+                    $exception,
+                );
             }
         });
 
@@ -67,13 +83,19 @@ return Application::configure(basePath: dirname(__DIR__))
                 $message = $genericMessages[$status] ?? 'Permintaan tidak dapat diproses.';
             }
 
-            return response()->json(['message' => $message], $status);
+            $code = $status === 404 && $message === 'Data yang dicari tidak ditemukan.' ? 'DATA_NOT_FOUND' : null;
+            return ApiErrorResponse::make($request, $message, $status, $code, exception: $exception);
         });
 
         $exceptions->render(function (\Throwable $exception, Request $request) use ($isApi) {
-            if ($exception instanceof ValidationException) return null;
             if ($isApi($request)) {
-                return response()->json(['message' => 'Terjadi kesalahan pada server. Silakan coba lagi.'], 500);
+                return ApiErrorResponse::make(
+                    $request,
+                    'Terjadi kesalahan pada server. Catat ID error lalu coba kembali.',
+                    500,
+                    'SERVER_ERROR',
+                    exception: $exception,
+                );
             }
         });
     })->create();

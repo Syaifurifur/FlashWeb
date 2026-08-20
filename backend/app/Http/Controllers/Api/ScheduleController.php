@@ -19,9 +19,7 @@ class ScheduleController extends Controller
 
     private function competitions(Request $request)
     {
-        $editionId = EventEdition::resolveCurrent()->id;
-        return $request->user()->role === 'super_admin' || $request->user()->hasPermission('competitions.manage')
-            ? Competition::where('event_edition_id', $editionId) : Competition::where('event_edition_id', $editionId)->whereKey($request->user()->competition_id);
+        return $request->user()->manageableCompetitionsQuery(EventEdition::resolveCurrent()->id);
     }
 
     private function authorizeCompetition(Request $request, Competition $competition): void

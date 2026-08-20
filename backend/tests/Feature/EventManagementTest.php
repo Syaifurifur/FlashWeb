@@ -35,16 +35,27 @@ class EventManagementTest extends TestCase
     {
         $this->postJson('/api/login', [])
             ->assertUnprocessable()
+            ->assertJsonPath('message', 'Data belum dapat diproses. Periksa kolom yang ditandai.')
             ->assertJsonPath('errors.email.0', 'email wajib diisi.')
-            ->assertJsonPath('errors.password.0', 'kata sandi wajib diisi.');
+            ->assertJsonPath('errors.password.0', 'kata sandi wajib diisi.')
+            ->assertJsonPath('error.code', 'VALIDATION_ERROR')
+            ->assertJsonPath('error.location.module', 'Autentikasi akun')
+            ->assertJsonPath('error.location.endpoint', 'POST /api/login')
+            ->assertJsonPath('error.fields.0.key', 'email')
+            ->assertJsonPath('error.fields.0.label', 'Email');
 
         $this->getJson('/api/competitions/lomba-yang-tidak-ada')
             ->assertNotFound()
-            ->assertJsonPath('message', 'Data yang dicari tidak ditemukan.');
+            ->assertJsonPath('message', 'Data yang dicari tidak ditemukan.')
+            ->assertJsonPath('error.code', 'DATA_NOT_FOUND')
+            ->assertJsonPath('error.location.module', 'Manajemen lomba');
 
         $this->getJson('/api/rute-yang-tidak-ada')
             ->assertNotFound()
-            ->assertJsonPath('message', 'Halaman atau data yang dicari tidak ditemukan.');
+            ->assertJsonPath('message', 'Halaman atau data yang dicari tidak ditemukan.')
+            ->assertJsonPath('error.code', 'NOT_FOUND')
+            ->assertJsonPath('error.location.endpoint', 'GET /api/rute-yang-tidak-ada')
+            ->assertJsonStructure(['error'=>['id','status','detected_at','location'=>['module','endpoint','path']]]);
     }
 
     public function test_public_can_browse_and_submit_a_valid_registration(): void
@@ -872,6 +883,136 @@ class EventManagementTest extends TestCase
         $this->assertNotNull($registration->fresh()->team_completed_at);
     }
 
+    public function test_large_team_players_and_documents_can_be_saved_across_multiple_sessions(): void
+    {
+        Storage::fake('public');
+        $competition = $this->competition();
+        $competition->update([
+            'participation_type'=>'team',
+            'team_size'=>12,
+            'official_count'=>2,
+            'team_update_deadline_at'=>now()->addDay(),
+            'document_upload_deadline_at'=>now()->addDays(2),
+            'fee'=>0,
+        ]);
+
+        $this->postJson('/api/registrations', [
+            'competition_id'=>$competition->id,
+            'full_name'=>'Ketua Tim Dua Belas',
+            'school_name'=>'SMA Tim Besar',
+            'email'=>'ketua-dua-belas@test.id',
+            'whatsapp'=>'081234567800',
+            'password'=>'password123',
+            'password_confirmation'=>'password123',
+            'consent'=>true,
+        ])->assertCreated();
+
+        $registration = Registration::firstOrFail();
+        User::where('email', 'ketua-dua-belas@test.id')->firstOrFail()
+            ->update(['api_token'=>hash('sha256', 'large-team-token')]);
+
+        $this->withToken('large-team-token')->putJson('/api/participant/registrations/'.$registration->id.'/team-profile', [
+            'team_name'=>'Tim Dua Belas',
+            'school_name'=>'SMA Tim Besar',
+            'school_city'=>'Jakarta',
+            'school_address'=>'Jl. Tim Besar No. 12',
+        ])->assertOk()
+            ->assertJsonPath('registration.completion_progress.team_size', 12)
+            ->assertJsonPath('registration.completion_progress.saved_members', 0)
+            ->assertJsonPath('registration.completion_progress.school_profile_complete', true)
+            ->assertJsonPath('registration.completion_progress.teacher_complete', false)
+            ->assertJsonPath('registration.completion_progress.team_profile_complete', false);
+
+        $this->withToken('large-team-token')->putJson('/api/participant/registrations/'.$registration->id.'/teacher', [
+            'teacher_name'=>'Guru Tim Besar',
+            'teacher_contact'=>'081298765400',
+        ])->assertOk()
+            ->assertJsonPath('registration.completion_progress.teacher_complete', true)
+            ->assertJsonPath('registration.completion_progress.team_profile_complete', true)
+            ->assertJsonPath('registration.completion_progress.official_saved', 0);
+
+        $this->withToken('large-team-token')->putJson('/api/participant/registrations/'.$registration->id.'/official-slots/2', [
+            'full_name'=>'Official Kedua',
+            'position'=>'Asisten Pelatih',
+            'whatsapp'=>'081298765402',
+        ])->assertOk()
+            ->assertJsonPath('registration.completion_progress.official_saved', 1)
+            ->assertJsonPath('registration.completion_progress.official_slots.0.complete', false)
+            ->assertJsonPath('registration.completion_progress.official_slots.1.name', 'Official Kedua');
+
+        $memberOne = [
+            'full_name'=>'Pemain Pertama', 'email'=>'pemain-01@test.id', 'whatsapp'=>'081234567801',
+            'nisn'=>'7000000001', 'birth_place'=>'Jakarta', 'birth_date'=>'2009-01-01',
+            'grade'=>'XI', 'mother_name'=>'Ibu Pemain Pertama',
+        ];
+        $memberTwelve = [
+            'full_name'=>'Pemain Kedua Belas', 'email'=>'pemain-12@test.id', 'whatsapp'=>'081234567812',
+            'nisn'=>'7000000012', 'birth_place'=>'Bogor', 'birth_date'=>'2009-12-01',
+            'grade'=>'X', 'mother_name'=>'Ibu Pemain Kedua Belas',
+        ];
+
+        $this->withToken('large-team-token')->putJson('/api/participant/registrations/'.$registration->id.'/member-slots/1', $memberOne)
+            ->assertOk()
+            ->assertJsonPath('registration.completion_progress.saved_members', 1)
+            ->assertJsonPath('registration.completion_progress.member_slots.0.name', 'Pemain Pertama');
+        $this->withToken('large-team-token')->putJson('/api/participant/registrations/'.$registration->id.'/member-slots/12', $memberTwelve)
+            ->assertOk()
+            ->assertJsonPath('registration.completion_progress.saved_members', 2)
+            ->assertJsonPath('registration.completion_progress.member_slots.11.data_complete', true);
+
+        $resumed = $this->withToken('large-team-token')->getJson('/api/participant/registrations')
+            ->assertOk()
+            ->assertJsonPath('0.completion_progress.saved_members', 2)
+            ->assertJsonPath('0.completion_progress.documented_members', 0);
+        $firstMemberId = $resumed->json('0.completion_progress.member_slots.0.member_id');
+
+        $this->withToken('large-team-token')->post('/api/participant/registrations/'.$registration->id.'/member-slots/6/documents')
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.documents.0', 'Pilih minimal satu file: kartu pelajar atau pas foto.');
+        $this->assertDatabaseMissing('registration_members', ['registration_id'=>$registration->id, 'member_order'=>6]);
+
+        $this->withToken('large-team-token')->post('/api/participant/registrations/'.$registration->id.'/member-slots/5/documents', [
+            'student_card'=>UploadedFile::fake()->create('kartu-pemain-5.pdf', 100, 'application/pdf'),
+        ])->assertOk()
+            ->assertJsonPath('registration.completion_progress.saved_members', 2)
+            ->assertJsonPath('registration.completion_progress.member_slots.4.student_card_uploaded', true)
+            ->assertJsonPath('registration.completion_progress.member_slots.4.data_complete', false);
+
+        $this->withToken('large-team-token')->post('/api/participant/registrations/'.$registration->id.'/members/'.$firstMemberId.'/documents', [
+            'student_card'=>UploadedFile::fake()->create('kartu-pemain-1.pdf', 100, 'application/pdf'),
+        ])->assertOk()
+            ->assertJsonPath('registration.completion_progress.member_slots.0.student_card_uploaded', true)
+            ->assertJsonPath('registration.completion_progress.member_slots.0.photo_uploaded', false)
+            ->assertJsonPath('registration.completion_progress.documented_members', 0);
+
+        $this->withToken('large-team-token')->post('/api/participant/registrations/'.$registration->id.'/members/'.$firstMemberId.'/documents', [
+            'photo'=>UploadedFile::fake()->create('foto-pemain-1.jpg', 100, 'image/jpeg'),
+        ])->assertOk()
+            ->assertJsonPath('registration.completion_progress.documented_members', 1)
+            ->assertJsonPath('team_completed', false);
+
+        $this->withToken('large-team-token')->post('/api/participant/registrations/'.$registration->id.'/documents', [
+            'school_logo'=>UploadedFile::fake()->create('logo.png', 100, 'image/png'),
+        ])->assertOk()
+            ->assertJsonPath('registration.documents_completed_at', null)
+            ->assertJsonPath('registration.completion_progress.shared_documents.uploaded', 1);
+        $this->withToken('large-team-token')->post('/api/participant/registrations/'.$registration->id.'/documents', [
+            'statement_letter'=>UploadedFile::fake()->create('pernyataan.pdf', 100, 'application/pdf'),
+        ])->assertOk()
+            ->assertJsonPath('registration.completion_progress.shared_documents.uploaded', 2);
+        $this->withToken('large-team-token')->post('/api/participant/registrations/'.$registration->id.'/documents', [
+            'school_recommendation_letter'=>UploadedFile::fake()->create('rekomendasi.docx', 100, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+        ])->assertOk()
+            ->assertJsonPath('registration.completion_progress.shared_documents.complete', true);
+
+        $this->assertNotNull($registration->fresh()->documents_completed_at);
+        $this->assertDatabaseHas('registration_members', [
+            'registration_id'=>$registration->id,
+            'member_order'=>12,
+            'full_name'=>'Pemain Kedua Belas',
+        ]);
+    }
+
     public function test_admin_can_manage_multiple_location_sessions_for_one_competition(): void
     {
         User::create(['name'=>'Admin Lokasi','email'=>'lokasi-admin@test.id','password'=>'password123','role'=>'super_admin','api_token'=>hash('sha256','lokasi-admin-token')]);
@@ -897,6 +1038,32 @@ class EventManagementTest extends TestCase
         $this->assertDatabaseHas('competition_sessions', ['competition_id'=>$competition->id,'city'=>'Bogor']);
         $this->getJson('/api/competitions/'.$competition->slug)
             ->assertOk()->assertJsonCount(2, 'sessions')->assertJsonPath('sessions.0.city', 'Bogor');
+    }
+
+    public function test_pic_and_spv_accounts_are_saved_without_competition_assignment(): void
+    {
+        $competition = $this->competition();
+        User::create([
+            'name'=>'Admin Akun Kota','email'=>'admin-akun-kota@test.id','password'=>'password123',
+            'role'=>'super_admin','api_token'=>hash('sha256','admin-akun-kota-token'),
+        ]);
+
+        $picResponse = $this->withToken('admin-akun-kota-token')->postJson('/api/manage/accounts', [
+            'name'=>'PIC Belum Ditugaskan','email'=>'pic-belum-ditugaskan@test.id','whatsapp'=>'081234567820',
+            'password'=>'password123','role'=>'pic','competition_id'=>$competition->id,'is_active'=>true,
+        ])->assertCreated()->assertJsonPath('competition_id', null);
+        $spvResponse = $this->withToken('admin-akun-kota-token')->postJson('/api/manage/accounts', [
+            'name'=>'SPV Belum Ditugaskan','email'=>'spv-belum-ditugaskan@test.id','whatsapp'=>'081234567821',
+            'password'=>'password123','role'=>'spv','competition_id'=>$competition->id,'is_active'=>true,
+        ])->assertCreated()->assertJsonPath('competition_id', null);
+
+        $this->assertDatabaseHas('users', ['id'=>$picResponse->json('id'),'role'=>'pic','competition_id'=>null]);
+        $this->assertDatabaseHas('users', ['id'=>$spvResponse->json('id'),'role'=>'spv','competition_id'=>null]);
+
+        $this->withToken('admin-akun-kota-token')->putJson('/api/manage/accounts/'.$picResponse->json('id'), [
+            'name'=>'PIC Belum Ditugaskan','email'=>'pic-belum-ditugaskan@test.id','whatsapp'=>'081234567820',
+            'password'=>'','role'=>'pic','competition_id'=>$competition->id,'is_active'=>true,
+        ])->assertOk()->assertJsonPath('competition_id', null);
     }
 
     public function test_super_admin_can_manage_competition_venues(): void
@@ -1065,6 +1232,139 @@ class EventManagementTest extends TestCase
         ]);
     }
 
+    public function test_same_pic_and_spv_can_be_assigned_to_multiple_places_and_competitions(): void
+    {
+        User::create([
+            'name'=>'Admin Multi Lokasi','email'=>'admin-multi-lokasi@test.id','password'=>'password123',
+            'role'=>'super_admin','api_token'=>hash('sha256','admin-multi-lokasi-token'),
+        ]);
+        $pic = User::create([
+            'name'=>'PIC Multi Lokasi','email'=>'pic-multi-lokasi@test.id','whatsapp'=>'081234567810',
+            'password'=>'password123','role'=>'pic','competition_id'=>null,'is_active'=>true,
+            'api_token'=>hash('sha256','pic-multi-lokasi-token'),
+        ]);
+        $supervisor = User::create([
+            'name'=>'SPV Multi Lokasi','email'=>'spv-multi-lokasi@test.id','whatsapp'=>'081234567811',
+            'password'=>'password123','role'=>'spv','competition_id'=>null,'is_active'=>true,
+            'api_token'=>hash('sha256','spv-multi-lokasi-token'),
+        ]);
+
+        $venues = collect([
+            ['slug'=>'makassar-multi','name'=>'Kampus BSI Makassar','city'=>'Makassar'],
+            ['slug'=>'bogor-multi','name'=>'Kampus BSI Bogor','city'=>'Bogor'],
+            ['slug'=>'bekasi-multi','name'=>'Kampus BSI Bekasi','city'=>'Bekasi'],
+        ])->map(fn (array $venue) => CompetitionVenue::create($venue + [
+            'address'=>'Jl. Pendidikan',
+            'activity_start_date'=>'2027-01-13',
+            'activity_end_date'=>'2027-01-19',
+            'pic_user_id'=>$pic->id,
+            'supervisor_user_id'=>$supervisor->id,
+            'is_active'=>true,
+        ]));
+
+        $sessionPayload = fn (CompetitionVenue $venue) => [
+            'venue_id'=>$venue->id,
+            'pic_slots'=>1,
+            'supervisor_slots'=>1,
+            'pic_ids'=>[$pic->id],
+            'supervisor_ids'=>[$supervisor->id],
+            'quota'=>30,
+            'fee'=>0,
+            'team_update_deadline_at'=>'2027-01-10 23:59:00',
+            'timeline'=>[
+                ['label'=>'Pendaftaran','type'=>'range','start_date'=>'2026-12-01','end_date'=>'2027-01-10'],
+                ['label'=>'Pelaksanaan','type'=>'single','date'=>'2027-01-15'],
+            ],
+            'is_active'=>true,
+        ];
+        $competitionPayload = fn (string $title, array $sessions) => [
+            'title'=>$title,
+            'category'=>'Science Competition',
+            'short_description'=>'Lomba dengan petugas yang dapat menangani beberapa lokasi.',
+            'description'=>'Penugasan PIC dan SPV disimpan per lokasi pelaksanaan.',
+            'guides'=>[['title'=>'Panduan','content'=>'Ikuti ketentuan lomba yang berlaku.']],
+            'participation_type'=>'individual',
+            'team_size'=>1,
+            'official_count'=>0,
+            'sessions'=>$sessions,
+        ];
+
+        $firstResponse = $this->withToken('admin-multi-lokasi-token')->postJson('/api/manage/competitions', $competitionPayload(
+            'Olimpiade Multi Kota',
+            [$sessionPayload($venues[0]), $sessionPayload($venues[1])],
+        ))->assertCreated()->assertJsonCount(2, 'sessions');
+        $secondResponse = $this->withToken('admin-multi-lokasi-token')->postJson('/api/manage/competitions', $competitionPayload(
+            'Karya Ilmiah Multi Kota',
+            [$sessionPayload($venues[0]), $sessionPayload($venues[2])],
+        ))->assertCreated()->assertJsonCount(2, 'sessions');
+
+        $firstCompetition = Competition::findOrFail($firstResponse->json('id'));
+        $secondCompetition = Competition::findOrFail($secondResponse->json('id'));
+        $unrelatedCompetition = $firstCompetition->replicate();
+        $unrelatedCompetition->title = 'Lomba Tanpa Penugasan';
+        $unrelatedCompetition->slug = 'lomba-tanpa-penugasan';
+        $unrelatedCompetition->save();
+
+        $sharedVenueSessions = CompetitionSession::where('venue_id', $venues[0]->id)->orderBy('id')->get();
+        $this->assertCount(2, $sharedVenueSessions);
+        $this->withToken('admin-multi-lokasi-token')->putJson('/api/manage/venues/'.$venues[0]->id.'/staff-assignments', [
+            'assignments'=>$sharedVenueSessions->map(fn (CompetitionSession $session) => [
+                'session_id'=>$session->id,
+                'pic_slots'=>1,
+                'supervisor_slots'=>1,
+                'pic_ids'=>[$pic->id],
+                'supervisor_ids'=>[$supervisor->id],
+            ])->all(),
+        ])->assertOk();
+
+        $this->assertSame(4, $pic->assignedCompetitionSessions()->wherePivot('role', 'pic')->count());
+        $this->assertSame(4, $supervisor->assignedCompetitionSessions()->wherePivot('role', 'spv')->count());
+
+        foreach (['pic-multi-lokasi-token', 'spv-multi-lokasi-token'] as $token) {
+            $competitionsResponse = $this->withToken($token)->getJson('/api/manage/competitions')
+                ->assertOk()
+                ->assertJsonCount(2);
+            $this->assertEqualsCanonicalizing(
+                [$firstCompetition->id, $secondCompetition->id],
+                collect($competitionsResponse->json())->pluck('id')->all(),
+            );
+            $this->withToken($token)->getJson('/api/manage/registration-competitions')
+                ->assertOk()
+                ->assertJsonCount(2);
+            $this->withToken($token)->getJson('/api/manage/judging')
+                ->assertOk()
+                ->assertJsonCount(2, 'competitions');
+            $this->withToken($token)->getJson('/api/manage/tournaments')
+                ->assertOk()
+                ->assertJsonCount(2, 'competitions');
+            $this->withToken($token)->getJson('/api/manage/schedules')
+                ->assertOk()
+                ->assertJsonCount(2, 'competitions');
+        }
+
+        $this->withToken('pic-multi-lokasi-token')->postJson('/api/manage/notifications', [
+            'competition_id'=>$firstCompetition->id,
+            'title'=>'Informasi Olimpiade',
+            'message'=>'Informasi untuk seluruh lokasi olimpiade.',
+        ])->assertCreated();
+        $this->withToken('spv-multi-lokasi-token')->postJson('/api/manage/notifications', [
+            'competition_id'=>$secondCompetition->id,
+            'title'=>'Informasi Karya Ilmiah',
+            'message'=>'Informasi untuk lokasi karya ilmiah.',
+        ])->assertCreated();
+        $this->withToken('pic-multi-lokasi-token')->postJson('/api/manage/notifications', [
+            'competition_id'=>$unrelatedCompetition->id,
+            'title'=>'Tidak Berhak','message'=>'Notifikasi ini harus ditolak.',
+        ])->assertForbidden();
+
+        foreach (['pic-multi-lokasi-token', 'spv-multi-lokasi-token'] as $token) {
+            $this->withToken($token)->getJson('/api/manage/notifications')
+                ->assertOk()
+                ->assertJsonCount(2)
+                ->assertJsonMissing(['competition_id'=>$unrelatedCompetition->id]);
+        }
+    }
+
     public function test_registration_requires_available_session_when_competition_has_locations(): void
     {
         $competition = $this->competition();
@@ -1080,7 +1380,11 @@ class EventManagementTest extends TestCase
         ];
 
         $this->postJson('/api/registrations', $payload)
-            ->assertUnprocessable()->assertJsonValidationErrors('competition_session_id');
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('competition_session_id')
+            ->assertJsonPath('error.code', 'UNPROCESSABLE_DATA')
+            ->assertJsonPath('error.location.module', 'Pendaftaran peserta')
+            ->assertJsonPath('error.fields.0.label', 'Lokasi dan jadwal');
 
         $this->postJson('/api/registrations', $payload + ['competition_session_id'=>$session->id])
             ->assertCreated();

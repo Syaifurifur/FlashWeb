@@ -43,6 +43,49 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Dialogs remain usable on phones, tablets, short landscape screens, and desktops. */
+.responsive-dialog-shell {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-top: max(.75rem, env(safe-area-inset-top));
+  overscroll-behavior: contain;
+}
+.responsive-dialog-panel {
+  display: flex;
+  width: 100%;
+  max-height: calc(100vh - .75rem);
+  max-height: calc(100dvh - max(.75rem, env(safe-area-inset-top)));
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 1.5rem 1.5rem 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.responsive-dialog-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+@media (min-width: 640px) {
+  .responsive-dialog-shell {
+    align-items: center;
+    padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+  }
+  .responsive-dialog-panel {
+    max-height: calc(100vh - 2rem);
+    max-height: calc(100dvh - 2rem);
+    border-radius: 1.5rem;
+    padding-bottom: 0;
+  }
+}
+
+:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 3px solid rgba(18, 104, 232, .72);
+  outline-offset: 3px;
+}
+
 .gallery-page { min-height: 100vh; background: #161616; color: #fff; }
 .gallery-hero { position: relative; isolation: isolate; overflow: hidden; min-height: 430px; padding: 8rem max(1.25rem, calc((100vw - 80rem) / 2)) 6rem; background: radial-gradient(circle at 78% 20%, rgba(18,104,232,.28), transparent 24rem), linear-gradient(180deg, rgba(22,22,22,.2), #161616), url('/theme/open9-bg-1.png') center/cover; }
 .gallery-hero::after { content: ''; position: absolute; inset: 0; z-index: -1; opacity: .07; background-image: url('/theme/open9-noise.png'); pointer-events: none; }

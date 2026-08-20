@@ -24,12 +24,7 @@ class ManagementController extends Controller
 {
     private function scopeCompetitions(Request $request)
     {
-        $user = $request->user();
-        $editionId = EventEdition::resolveCurrent()->id;
-        if ($user->role === 'super_admin' || $user->hasPermission('competitions.manage')) return Competition::where('event_edition_id', $editionId);
-        if ($user->role === 'pic') return Competition::where('event_edition_id', $editionId)->where(fn ($query) => $query->whereKey($user->competition_id)->orWhereHas('sessions', fn ($session) => $session->where('pic_user_id', $user->id)->orWhereHas('pics', fn ($pic) => $pic->whereKey($user->id))));
-        if ($user->role === 'spv') return Competition::where('event_edition_id', $editionId)->whereHas('sessions', fn ($session) => $session->where('supervisor_user_id', $user->id)->orWhereHas('supervisors', fn ($supervisor) => $supervisor->whereKey($user->id)));
-        return Competition::where('event_edition_id', $editionId)->whereKey($user->competition_id);
+        return $request->user()->manageableCompetitionsQuery(EventEdition::resolveCurrent()->id);
     }
 
     public function dashboard(Request $request)
@@ -176,9 +171,9 @@ class ManagementController extends Controller
             'sessions.*.pic_slots'=>'nullable|integer|min:1|max:10',
             'sessions.*.supervisor_slots'=>'nullable|integer|min:1|max:10',
             'sessions.*.pic_ids'=>'nullable|array|min:1|max:10',
-            'sessions.*.pic_ids.*'=>'integer|distinct|exists:users,id',
+            'sessions.*.pic_ids.*'=>'integer|exists:users,id',
             'sessions.*.supervisor_ids'=>'nullable|array|min:1|max:10',
-            'sessions.*.supervisor_ids.*'=>'integer|distinct|exists:users,id',
+            'sessions.*.supervisor_ids.*'=>'integer|exists:users,id',
             'sessions.*.city'=>'nullable|string|max:120|required_without:sessions.*.venue_id',
             'sessions.*.venue'=>'nullable|string|max:180|required_without:sessions.*.venue_id',
             'sessions.*.quota'=>'nullable|integer|min:1',
@@ -254,8 +249,8 @@ class ManagementController extends Controller
             if (array_key_exists('supervisor_ids', $session) && $supervisorIds->count() !== $supervisorSlots) abort(422, "Jumlah SPV untuk {$cityName} harus sama dengan jumlah slot SPV.");
             $pics = User::whereIn('id', $picIds)->get();
             $supervisors = User::whereIn('id', $supervisorIds)->get();
-            if ($pics->count() !== $picIds->count() || $pics->contains(fn ($pic) => $pic->role !== 'pic')) abort(422, 'Seluruh petugas PIC kota harus menggunakan akun PIC.');
-            if ($supervisors->count() !== $supervisorIds->count() || $supervisors->contains(fn ($supervisor) => $supervisor->role !== 'spv')) abort(422, 'Seluruh petugas SPV kota harus menggunakan akun SPV.');
+            if ($pics->count() !== $picIds->count() || $pics->contains(fn ($pic) => $pic->role !== 'pic' || ! $pic->is_active || empty($pic->whatsapp))) abort(422, 'Seluruh petugas PIC kota harus menggunakan akun PIC aktif dengan nomor WhatsApp.');
+            if ($supervisors->count() !== $supervisorIds->count() || $supervisors->contains(fn ($supervisor) => $supervisor->role !== 'spv' || ! $supervisor->is_active || empty($supervisor->whatsapp))) abort(422, 'Seluruh petugas SPV kota harus menggunakan akun SPV aktif dengan nomor WhatsApp.');
             $pic = $pics->firstWhere('id', $picIds->first());
             $supervisor = $supervisors->firstWhere('id', $supervisorIds->first());
             $timeline = $this->normalizeTimeline($session['timeline'] ?? $legacyTimeline);
@@ -365,17 +360,18 @@ class ManagementController extends Controller
     }
     public function storePic(Request $request)
     {
-        $data=$request->validate(['name'=>'required|string|max:120','email'=>'required|email|unique:users,email','whatsapp'=>['required','regex:/^[0-9+]{10,15}$/'],'password'=>'required|string|min:8','competition_id'=>'required|exists:competitions,id']);
-        $competition=Competition::findOrFail($data['competition_id']);
-        if($competition->pics()->count()>=$competition->pic_slots)return response()->json(['message'=>'Slot PIC pada lomba ini sudah penuh.'],422);
-        $data['role']='pic'; return response()->json(User::create($data),201);
+        $data=$request->validate(['name'=>'required|string|max:120','email'=>'required|email|unique:users,email','whatsapp'=>['required','regex:/^[0-9+]{10,15}$/'],'password'=>'required|string|min:8']);
+        $data['role']='pic';
+        $data['competition_id']=null;
+        return response()->json(User::create($data),201);
     }
     public function updatePic(Request $request, User $user)
     {
-        $data=$request->validate(['name'=>'required|string|max:120','email'=>'required|email|unique:users,email,'.$user->id,'whatsapp'=>['required','regex:/^[0-9+]{10,15}$/'],'password'=>'nullable|string|min:8','competition_id'=>'required|exists:competitions,id']);
-        $competition=Competition::findOrFail($data['competition_id']);
-        if($competition->pics()->where('id','!=',$user->id)->count()>=$competition->pic_slots)return response()->json(['message'=>'Slot PIC pada lomba ini sudah penuh.'],422);
-        if(empty($data['password'])) unset($data['password']); $user->update($data); return $user;
+        $data=$request->validate(['name'=>'required|string|max:120','email'=>'required|email|unique:users,email,'.$user->id,'whatsapp'=>['required','regex:/^[0-9+]{10,15}$/'],'password'=>'nullable|string|min:8']);
+        $data['competition_id']=null;
+        if(empty($data['password'])) unset($data['password']);
+        $user->update($data);
+        return $user;
     }
     public function destroyPic(User $user) { abort_if($user->role !== 'pic',422); $user->delete(); return response()->noContent(); }
 
@@ -394,8 +390,7 @@ class ManagementController extends Controller
             'role'=>['required',Rule::in(array_merge(['super_admin','pic','spv','judge','participant'],AccessRole::pluck('slug')->all()))],'competition_id'=>'nullable|exists:competitions,id','is_active'=>'boolean',
         ]);
         if(in_array($data['role'],['pic','spv'],true)&&empty($data['whatsapp']))return response()->json(['message'=>'Nomor WhatsApp aktif wajib diisi untuk PIC dan SPV.'],422);
-        if($data['role']==='pic'&&!empty($data['competition_id'])&&Competition::find($data['competition_id'])->pics()->count()>=Competition::find($data['competition_id'])->pic_slots)return response()->json(['message'=>'Slot PIC pada lomba ini sudah penuh.'],422);
-        if(in_array($data['role'],['super_admin','spv','judge','participant'],true))$data['competition_id']=null;
+        if(in_array($data['role'],['super_admin','pic','spv','judge','participant'],true))$data['competition_id']=null;
         return response()->json(User::create($data),201);
     }
 
@@ -407,8 +402,7 @@ class ManagementController extends Controller
         ]);
         if($user->id===$request->user()->id&&($data['role']!=='super_admin'||!$data['is_active']))return response()->json(['message'=>'Anda tidak dapat menurunkan role atau menonaktifkan akun sendiri.'],422);
         if(in_array($data['role'],['pic','spv'],true)&&empty($data['whatsapp']))return response()->json(['message'=>'Nomor WhatsApp aktif wajib diisi untuk PIC dan SPV.'],422);
-        if($data['role']==='pic'&&!empty($data['competition_id'])&&Competition::find($data['competition_id'])->pics()->where('id','!=',$user->id)->count()>=Competition::find($data['competition_id'])->pic_slots)return response()->json(['message'=>'Slot PIC pada lomba ini sudah penuh.'],422);
-        if(in_array($data['role'],['super_admin','spv','judge','participant'],true))$data['competition_id']=null;
+        if(in_array($data['role'],['super_admin','pic','spv','judge','participant'],true))$data['competition_id']=null;
         if(empty($data['password']))unset($data['password']);
         $user->update($data);
         return $user->fresh('competition:id,title');

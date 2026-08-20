@@ -41,6 +41,11 @@ Route::middleware('api.auth')->group(function () {
         Route::get('/participant/registrations/{registration}', [ParticipantController::class, 'show']);
         Route::post('/participant/registrations/{registration}', [ParticipantController::class, 'update']);
         Route::post('/participant/registrations/{registration}/team', [ParticipantController::class, 'updateTeam']);
+        Route::put('/participant/registrations/{registration}/team-profile', [ParticipantController::class, 'updateTeamProfile']);
+        Route::put('/participant/registrations/{registration}/teacher', [ParticipantController::class, 'updateTeacher']);
+        Route::put('/participant/registrations/{registration}/member-slots/{memberOrder}', [ParticipantController::class, 'upsertMember']);
+        Route::put('/participant/registrations/{registration}/official-slots/{officialOrder}', [ParticipantController::class, 'upsertOfficial']);
+        Route::post('/participant/registrations/{registration}/member-slots/{memberOrder}/documents', [ParticipantController::class, 'uploadMemberSlotDocuments']);
         Route::post('/participant/registrations/{registration}/members/{registrationMember}/documents', [ParticipantController::class, 'uploadMemberDocuments']);
         Route::post('/participant/registrations/{registration}/documents', [ParticipantController::class, 'uploadDocuments']);
         Route::post('/participant/registrations/{registration}/work-submission', [ParticipantController::class, 'submitWork']);

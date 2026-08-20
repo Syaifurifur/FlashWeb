@@ -16,9 +16,10 @@ class NotificationController extends Controller
 
     public function index(Request $request)
     {
-        $query = CompetitionNotification::where('event_edition_id', EventEdition::resolveCurrent()->id)->with(['competition:id,title', 'author:id,name'])->latest('published_at');
+        $editionId = EventEdition::resolveCurrent()->id;
+        $query = CompetitionNotification::where('event_edition_id', $editionId)->with(['competition:id,title', 'author:id,name'])->latest('published_at');
         if (! $this->canManageAll($request)) {
-            $query->where('competition_id', $request->user()->competition_id);
+            $query->whereIn('competition_id', $request->user()->manageableCompetitionsQuery($editionId)->select('id'));
         }
 
         return $query->limit(100)->get();
@@ -33,7 +34,11 @@ class NotificationController extends Controller
         ]);
 
         if (! $this->canManageAll($request)) {
-            abort_unless($request->user()->competition_id && (int) $data['competition_id'] === (int) $request->user()->competition_id, 403);
+            abort_unless(
+                ! empty($data['competition_id'])
+                && $request->user()->manageableCompetitionsQuery(EventEdition::resolveCurrent()->id)->whereKey($data['competition_id'])->exists(),
+                403
+            );
         }
 
         $notification = CompetitionNotification::create([
@@ -49,7 +54,11 @@ class NotificationController extends Controller
     public function destroy(Request $request, CompetitionNotification $notification)
     {
         if (! $this->canManageAll($request)) {
-            abort_unless($notification->competition_id === $request->user()->competition_id, 403);
+            abort_unless(
+                $notification->competition_id
+                && $request->user()->manageableCompetitionsQuery(EventEdition::resolveCurrent()->id)->whereKey($notification->competition_id)->exists(),
+                403
+            );
         }
         $notification->delete();
 

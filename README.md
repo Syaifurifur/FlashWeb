@@ -56,7 +56,12 @@ Setiap perubahan fitur, skema database, API, hak akses, atau alur pengguna wajib
 
 ## Changelog
 
-- Mengubah pelengkapan data tim besar menjadi proses bertahap: data teks disimpan lebih dahulu, kemudian dokumen diunggah per anggota secara berurutan dengan indikator progres dan dukungan coba lagi tanpa mengulang upload yang sudah berhasil.
+- Menambahkan pemeriksaan dokumen khusus petugas: tombol kartu pelajar, pas foto, dokumen sekolah, karya, dan bukti pembayaran tetap tampil; file yang tersedia dibuka normal, sedangkan tombol file yang belum di-upload menampilkan popup spesifik tanpa membuka tautan kosong.
+- Popup kesalahan dan dokumen kosong kini langsung menerima fokus, menahan navigasi keyboard di dalam dialog, dapat ditutup dengan Esc, mengembalikan fokus ke tombol pemicu, serta menyesuaikan tampilan ponsel, tablet, desktop, layar pendek, dan safe area perangkat.
+- Memisahkan pengisian tim besar menjadi empat form mandiri: data pemain per slot, identitas tim/sekolah, guru pendamping, dan official per slot; setiap bagian memiliki endpoint, status kelengkapan, serta tombol simpan sendiri sehingga tidak saling mengirim ulang atau menimpa data.
+- Mengubah pengelolaan tim besar menjadi slot per pemain: biodata disimpan satu pemain setiap kali, kartu pelajar dan pas foto dapat diunggah terpisah bahkan sebelum biodata lengkap, progres pemain/official/dokumen tampil di dashboard, dan seluruh proses dapat dilanjutkan pada sesi berikutnya tanpa mengulang data atau file yang sudah berhasil.
+- Menambahkan sistem error terpusat dengan pesan Indonesia yang mudah dibaca, lokasi modul/halaman/endpoint, rincian kolom yang bermasalah, ID error untuk pelacakan, dan detail file/baris khusus mode debug.
+- Memisahkan pembuatan akun PIC/SPV dari penugasan: akun tidak lagi memilih lomba saat dibuat atau diedit, lalu ditugaskan langsung melalui menu Tempat pada kota masing-masing dan dapat dipakai di beberapa tempat/lomba sekaligus; akses ke pendaftar, notifikasi, penilaian, drawing, dan jadwal mengikuti seluruh penugasan kota.
 - Mengganti menu Informasi menjadi Download Dokumen dan menambahkan halaman publik yang otomatis menampilkan serta mengunduh dokumen global hasil unggahan admin.
 - Mengganti kontak email pada footer menjadi tautan resmi `www.bsi.ac.id` yang terbuka di tab baru.
 - Memperjelas warna teks kartu pembayaran detail lomba agar nominal, label, dan batas pendaftaran tetap kontras di atas background gelap pada light maupun dark mode.

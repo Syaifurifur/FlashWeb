@@ -4,6 +4,7 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Database\Factories\UserFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -69,6 +70,42 @@ class User extends Authenticatable
     public function managedVenues()
     {
         return $this->hasMany(CompetitionVenue::class, 'pic_user_id');
+    }
+
+    public function assignedCompetitionSessions()
+    {
+        return $this->belongsToMany(CompetitionSession::class, 'competition_session_staff')
+            ->withPivot(['role', 'sort_order'])
+            ->withTimestamps();
+    }
+
+    public function manageableCompetitionsQuery(int $editionId): Builder
+    {
+        $query = Competition::query()->where('event_edition_id', $editionId);
+
+        if ($this->role === 'super_admin' || $this->hasPermission('competitions.manage')) {
+            return $query;
+        }
+
+        if ($this->role === 'pic') {
+            return $query->where(function (Builder $competitions) {
+                $competitions->whereHas('sessions', fn (Builder $sessions) => $sessions
+                    ->where('pic_user_id', $this->id)
+                    ->orWhereHas('pics', fn (Builder $pics) => $pics->whereKey($this->id)));
+
+                if ($this->competition_id) {
+                    $competitions->orWhere('competitions.id', $this->competition_id);
+                }
+            });
+        }
+
+        if ($this->role === 'spv') {
+            return $query->whereHas('sessions', fn (Builder $sessions) => $sessions
+                ->where('supervisor_user_id', $this->id)
+                ->orWhereHas('supervisors', fn (Builder $supervisors) => $supervisors->whereKey($this->id)));
+        }
+
+        return $query->whereKey($this->competition_id ?? 0);
     }
 
     public function accessRole() { return $this->belongsTo(AccessRole::class, 'role', 'slug'); }

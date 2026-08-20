@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CalendarDays, Clock3, GripVertical, MapPin, Plus, Send, Trash2 } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
+import { api } from './api'
 
-const API=import.meta.env.VITE_API_URL||'http://127.0.0.1:8000/api'
-async function api(path,options={}){const token=localStorage.getItem('nova_token'),edition=token&&localStorage.getItem('bsi_event_edition'),response=await fetch(`${API}${path}`,{...options,headers:{Accept:'application/json','Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`} :{}),...(edition?{'X-BSI-Edition':edition}:{})}}),data=await response.json().catch(()=>({}));if(!response.ok){const error=new Error(data.message||'Terjadi kesalahan.');error.conflicts=data.conflicts;throw error}return data}
 const labels={unscheduled:'Belum dijadwalkan',upcoming:'Akan datang',check_in:'Check-in',ongoing:'Sedang berlangsung',delayed:'Tertunda',completed:'Selesai',walkover:'Walkover',cancelled:'Dibatalkan',bye:'Bye'}
 const colors={unscheduled:'bg-slate-100 text-slate-600',upcoming:'bg-blue-50 text-blue-700',check_in:'bg-amber-50 text-amber-700',ongoing:'bg-emerald-50 text-emerald-700',delayed:'bg-orange-50 text-orange-700',completed:'bg-slate-800 text-white',walkover:'bg-violet-50 text-violet-700',cancelled:'bg-rose-50 text-rose-700',bye:'bg-slate-100 text-slate-500'}
 const nameOf=x=>x?.team_name||x?.full_name||'Menunggu pemenang'

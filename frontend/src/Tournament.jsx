@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Download, GripVertical, LockKeyhole, Play, Printer, ShieldCheck, Trophy } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
+import { api } from './api'
 
-const API=import.meta.env.VITE_API_URL||'http://127.0.0.1:8000/api'
-async function api(path,options={}){const token=localStorage.getItem('nova_token'),edition=token&&localStorage.getItem('bsi_event_edition'),response=await fetch(`${API}${path}`,{...options,headers:{Accept:'application/json','Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`} :{}),...(edition?{'X-BSI-Edition':edition}:{})}}),data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.message||'Terjadi kesalahan.');return data}
 const nameOf=participant=>participant?.team_name||participant?.full_name||'BYE'
 const dateTime=value=>value?new Intl.DateTimeFormat('id-ID',{dateStyle:'medium',timeStyle:'short'}).format(new Date(value)):'Belum dijadwalkan'
 const formatLabels={single_elimination:'Single Elimination',double_elimination:'Double Elimination',round_robin:'Round Robin · Setengah Kompetisi',round_robin_full:'Round Robin · Kompetisi Penuh',groups_knockout:'Grup → Knockout'}
