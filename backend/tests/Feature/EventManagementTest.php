@@ -493,9 +493,18 @@ class EventManagementTest extends TestCase
             'title'=>'Istirahat','venue'=>'Lapangan 2','starts_at'=>'2030-01-15 12:00:00','duration_minutes'=>60,
         ])->assertCreated()->assertJsonCount(1,'blocks');
         $this->assertDatabaseHas('tournament_schedule_blocks',['competition_id'=>$competition->id,'starts_at'=>'2030-01-15 05:00:00']);
-        $this->getJson('/api/competitions/'.$competition->slug.'/schedule')->assertOk()
+        $matches[0]->update(['status'=>'completed','score_a'=>3,'score_b'=>1,'winner_id'=>$matches[0]->participant_a_id]);
+        $tvFeed=$this->getJson('/api/competitions/'.$competition->slug.'/schedule')->assertOk()
             ->assertJsonPath('draw.id',$draw->json('id'))->assertJsonPath('timezone','Asia/Jakarta')
             ->assertJsonPath('timezone_label','WIB')->assertJsonPath('utc_offset','+07:00')->assertJsonCount(1,'blocks');
+        $tvResult=collect($tvFeed->json('matches'))->firstWhere('id',$matches[0]->id);
+        $tvNext=collect($tvFeed->json('matches'))->firstWhere('id',$matches[1]->id);
+        $this->assertSame('completed',$tvResult['status']);
+        $this->assertSame(3,$tvResult['score_a']);
+        $this->assertSame(1,$tvResult['score_b']);
+        $this->assertSame($matches[0]->participant_a_id,$tvResult['winner_id']);
+        $this->assertSame('upcoming',$tvNext['status']);
+        $this->assertNotNull($tvNext['scheduled_at']);
     }
 
     public function test_panitia_generates_automatic_schedule_in_wib_with_gap_capacity_and_status_protection(): void
@@ -598,6 +607,27 @@ class EventManagementTest extends TestCase
             ->assertOk()->assertJsonCount(1,'data');
         $this->withToken('admin-filter-token')->getJson('/api/manage/registrations?competition_id='.$other->id)
             ->assertOk()->assertJsonCount(0,'data');
+    }
+
+    public function test_registration_list_supports_paging_and_page_size(): void
+    {
+        $competition=$this->competition();
+        User::create(['name'=>'Admin Paging','email'=>'admin-paging@test.id','password'=>'password123','role'=>'super_admin','api_token'=>hash('sha256','admin-paging-token')]);
+        foreach(range(1,23) as $number) Registration::create([
+            'competition_id'=>$competition->id,'ticket_code'=>'PAGING-'.str_pad($number,3,'0',STR_PAD_LEFT),'full_name'=>'Peserta Paging '.$number,
+            'whatsapp'=>'08129999'.str_pad($number,4,'0',STR_PAD_LEFT),'email'=>'paging'.$number.'@test.id','birth_place'=>'Jakarta','birth_date'=>'2009-01-01',
+            'grade'=>'XI','nisn'=>(string)(7200000000+$number),'mother_name'=>'Ibu','school_name'=>'Sekolah Paging',
+            'teacher_name'=>'Guru','teacher_contact'=>'081298765432','student_card_path'=>'a.pdf','delegation_letter_path'=>'b.pdf','photo_path'=>'c.jpg','consent'=>true,
+        ]);
+
+        $this->withToken('admin-paging-token')->getJson('/api/manage/registrations?per_page=10&page=2')
+            ->assertOk()->assertJsonCount(10,'data')->assertJsonPath('current_page',2)
+            ->assertJsonPath('per_page',10)->assertJsonPath('last_page',3)
+            ->assertJsonPath('from',11)->assertJsonPath('to',20)->assertJsonPath('total',23);
+        $this->withToken('admin-paging-token')->getJson('/api/manage/registrations?per_page=50&page=1')
+            ->assertOk()->assertJsonCount(23,'data')->assertJsonPath('last_page',1)->assertJsonPath('total',23);
+        $this->withToken('admin-paging-token')->getJson('/api/manage/registrations?per_page=15')
+            ->assertUnprocessable()->assertJsonValidationErrors(['per_page']);
     }
 
     public function test_excel_export_and_super_admin_only_registration_deletion(): void

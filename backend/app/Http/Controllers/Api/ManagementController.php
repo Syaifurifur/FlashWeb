@@ -437,13 +437,17 @@ class ManagementController extends Controller
 
     public function registrations(Request $request)
     {
-        $request->validate(['competition_id'=>'nullable|integer|exists:competitions,id']);
+        $request->validate([
+            'competition_id'=>'nullable|integer|exists:competitions,id',
+            'page'=>'nullable|integer|min:1',
+            'per_page'=>'nullable|integer|in:10,20,50,100',
+        ]);
         $ids=$this->scopeCompetitions($request)->pluck('id');
         $q=Registration::with('competition:id,title,category', 'competitionSession')->whereIn('competition_id',$ids);
         if($request->filled('status')&&$request->status!=='all')$q->where('status',$request->status);
         if($request->filled('competition_id'))$q->where('competition_id',$request->integer('competition_id'));
         if($request->filled('search'))$q->where(fn($x)=>$x->where('full_name','like','%'.$request->search.'%')->orWhere('team_name','like','%'.$request->search.'%')->orWhere('ticket_code','like','%'.$request->search.'%')->orWhere('school_name','like','%'.$request->search.'%'));
-        return $q->latest()->paginate(20);
+        return $q->latest()->paginate($request->integer('per_page', 20))->withQueryString();
     }
 
     public function registrationCompetitions(Request $request)

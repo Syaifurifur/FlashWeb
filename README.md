@@ -56,6 +56,9 @@ Setiap perubahan fitur, skema database, API, hak akses, atau alur pengguna wajib
 
 ## Changelog
 
+- Menambahkan TV Mode publik untuk menayangkan skor pertandingan berlangsung/selesai dan jadwal pertandingan berikutnya, lengkap dengan filter lapangan, jam WIB, layar penuh, refresh otomatis 15 detik, serta rotasi daftar setiap 10 detik.
+- Merancang ulang Manajemen Lomba menjadi dashboard pengeditan yang menampilkan ringkasan lomba/pendaftar/kota/kelengkapan, pencarian dan filter, penanda konfigurasi yang belum lengkap, serta akses langsung ke editor data-kota, panduan, format peserta, dokumen, dan pratinjau publik.
+- Menambahkan paging pada Data Pendaftar dengan pilihan 10, 20, 50, atau 100 baris per halaman, navigasi nomor/sebelumnya/berikutnya, ringkasan rentang data, serta reset halaman saat pencarian atau filter berubah.
 - Pemilihan kampus pada formulir lomba kini hanya mengisi kota dan venue; PIC serta SPV tidak lagi tercentang otomatis dari master kampus dan wajib dipilih langsung oleh pengguna.
 - Menambahkan pembuatan jadwal pertandingan otomatis dan manual: panitia dapat memilih rentang tanggal/jam WIB, durasi, jeda, jumlah hari, dan lapangan untuk penyusunan otomatis bebas benturan, atau mengatur pertandingan lewat drag-and-drop dan editor detail; pertandingan aktif/selesai dilindungi serta perubahan dapat mengirim notifikasi peserta.
 - Menetapkan seluruh tanggal-jam aplikasi menggunakan zona Asia/Jakarta (GMT+7): input admin diperlakukan sebagai WIB, waktu disimpan terstandardisasi dalam UTC, serta label WIB ditampilkan konsisten pada deadline, agenda kota, notifikasi, drawing, timeline jadwal, dan halaman publik.
