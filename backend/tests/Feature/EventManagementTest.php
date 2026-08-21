@@ -357,6 +357,7 @@ class EventManagementTest extends TestCase
             ['name'=>'Tim Belum Lengkap','status'=>'approved','complete'=>false,'reviewed'=>true],
             ['name'=>'Tim Belum Divalidasi','status'=>'pending','complete'=>true,'reviewed'=>false],
             ['name'=>'Tim Tanpa Pemeriksa','status'=>'approved','complete'=>true,'reviewed'=>false],
+            ['name'=>'Tim Ditolak','status'=>'rejected','complete'=>true,'reviewed'=>true],
         ];
         foreach($states as $index=>$state){
             $registration=Registration::create([
@@ -373,11 +374,89 @@ class EventManagementTest extends TestCase
 
         $this->withToken('pic-validasi-drawing-token')->getJson('/api/manage/tournaments?competition_id='.$competition->id)
             ->assertOk()->assertJsonCount(2,'participants')
+            ->assertJsonCount(3,'force_majeure_candidates')
+            ->assertJsonPath('drawing_readiness.verified',2)
+            ->assertJsonPath('drawing_readiness.force_majeure_candidates',3)
+            ->assertJsonPath('drawing_readiness.rejected',1)
             ->assertJsonPath('participants.0.team_name','Tim Layak 1')
             ->assertJsonPath('participants.1.team_name','Tim Layak 2');
         $this->withToken('pic-validasi-drawing-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
             'mode'=>'random','format'=>'single_elimination',
         ])->assertCreated()->assertJsonCount(2,'entries');
+
+        $pending=Registration::where('team_name','Tim Belum Divalidasi')->firstOrFail();
+        $this->withToken('pic-validasi-drawing-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
+            'mode'=>'random','format'=>'single_elimination','force_majeure_ids'=>[$pending->id],
+            'force_majeure_reason'=>'Singkat',
+        ])->assertUnprocessable()->assertJsonPath('message','Alasan force majeure wajib diisi minimal 10 karakter.');
+
+        $rejected=Registration::where('team_name','Tim Ditolak')->firstOrFail();
+        $this->withToken('pic-validasi-drawing-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
+            'mode'=>'random','format'=>'single_elimination','force_majeure_ids'=>[$rejected->id],
+            'force_majeure_reason'=>'Keputusan rapat panitia sebelum drawing.',
+        ])->assertUnprocessable()->assertJsonPath('message','Pilihan force majeure tidak valid atau tim sudah ditolak.');
+
+        $forceMajeure=$this->withToken('pic-validasi-drawing-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
+            'mode'=>'random','format'=>'single_elimination','force_majeure_ids'=>[$pending->id],
+            'force_majeure_reason'=>'Dokumen asli sedang diverifikasi saat jadwal drawing dimulai.',
+        ])->assertCreated()->assertJsonCount(4,'entries')
+            ->assertJsonPath('settings.force_majeure.registration_ids.0',$pending->id)
+            ->assertJsonPath('settings.force_majeure.teams.0.status','pending')
+            ->assertJsonPath('settings.force_majeure.approved_by.id',$pic->id);
+        $this->assertContains($pending->id,collect($forceMajeure->json('entries'))->pluck('registration_id'));
+    }
+
+    public function test_manual_drawing_supports_bracket_groups_and_round_robin_formats(): void
+    {
+        $competition=$this->competition();
+        User::create(['name'=>'Admin Manual Drawing','email'=>'admin-manual-drawing@test.id','password'=>'password123','role'=>'super_admin','api_token'=>hash('sha256','admin-manual-drawing-token')]);
+        $registrations=collect();
+        foreach(range(1,6) as $number)$registrations->push(Registration::create([
+            'competition_id'=>$competition->id,'ticket_code'=>'MANUAL-'.$number,'full_name'=>'Tim Manual '.$number,
+            'whatsapp'=>'08126666'.str_pad($number,4,'0',STR_PAD_LEFT),'email'=>'manual'.$number.'@test.id',
+            'school_name'=>'Sekolah Manual '.$number,'consent'=>true,'status'=>'approved',
+        ]));
+        $ids=$registrations->pluck('id')->all();
+        $slots=[$ids[2],null,$ids[0],$ids[5],$ids[1],null,$ids[4],$ids[3]];
+
+        $single=$this->withToken('admin-manual-drawing-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
+            'mode'=>'manual','format'=>'single_elimination','manual_slots'=>$slots,'avoid_same_school'=>true,
+        ])->assertCreated()->assertJsonCount(8,'entries')
+            ->assertJsonPath('entries.0.registration_id',$ids[2])
+            ->assertJsonPath('entries.1.registration_id',null)
+            ->assertJsonPath('entries.2.registration_id',$ids[0])
+            ->assertJsonPath('entries.3.registration_id',$ids[5]);
+        $this->assertSame($slots,collect($single->json('entries'))->pluck('registration_id')->all());
+
+        $invalidSlots=$slots;
+        $invalidSlots[7]=$ids[2];
+        $this->withToken('admin-manual-drawing-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
+            'mode'=>'manual','format'=>'single_elimination','manual_slots'=>$invalidSlots,
+        ])->assertUnprocessable()->assertJsonPath('message','Slot manual harus memuat setiap peserta tepat satu kali; slot lainnya boleh BYE.');
+
+        $this->withToken('admin-manual-drawing-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
+            'mode'=>'manual','format'=>'double_elimination','manual_slots'=>$slots,
+        ])->assertCreated()->assertJsonPath('entries.0.registration_id',$ids[2]);
+
+        $groups=[[$ids[0],$ids[3],$ids[4]],[$ids[1],$ids[2],$ids[5]]];
+        $groupDraw=$this->withToken('admin-manual-drawing-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
+            'mode'=>'manual','format'=>'groups_knockout','group_count'=>2,'manual_groups'=>$groups,
+        ])->assertCreated()->assertJsonCount(6,'entries');
+        $this->assertSame($groups[0],collect($groupDraw->json('entries'))->where('group_name','Grup A')->pluck('registration_id')->values()->all());
+        $this->assertSame($groups[1],collect($groupDraw->json('entries'))->where('group_name','Grup B')->pluck('registration_id')->values()->all());
+        $this->withToken('admin-manual-drawing-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
+            'mode'=>'manual','format'=>'groups_knockout','group_count'=>2,
+            'manual_groups'=>[[$ids[0]],[$ids[1],$ids[2],$ids[3],$ids[4],$ids[5]]],
+        ])->assertUnprocessable()->assertJsonPath('message','Setiap grup manual harus berisi minimal dua peserta.');
+
+        $reverse=array_reverse($ids);
+        $this->withToken('admin-manual-drawing-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
+            'mode'=>'manual','format'=>'round_robin','manual_order'=>$reverse,
+        ])->assertCreated()->assertJsonPath('entries.0.registration_id',$reverse[0]);
+        $this->withToken('admin-manual-drawing-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
+            'mode'=>'manual','format'=>'round_robin_full','manual_order'=>$ids,
+            'host_ids'=>[$ids[5]],'host_policy'=>'first',
+        ])->assertCreated()->assertJsonPath('entries.0.registration_id',$ids[0]);
     }
 
     public function test_panitia_schedules_bracket_detects_conflicts_and_notifies_participants(): void

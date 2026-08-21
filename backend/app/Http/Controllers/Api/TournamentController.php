@@ -36,14 +36,43 @@ class TournamentController extends Controller
                 ->has('members', '=', $competition->team_size));
     }
 
+    private function forceMajeureCandidates(Competition $competition): Collection
+    {
+        $eligibleIds = $this->eligibleParticipants($competition)->pluck('id');
+
+        return Registration::where('competition_id', $competition->id)
+            ->where('status', '!=', 'rejected')
+            ->whereNotIn('id', $eligibleIds)
+            ->withCount('members')
+            ->orderByRaw('COALESCE(team_name, full_name)')
+            ->get([
+                'id', 'ticket_code', 'full_name', 'team_name', 'school_name', 'status',
+                'team_completed_at', 'reviewed_by', 'reviewed_at',
+            ])
+            ->map(function (Registration $registration) use ($competition) {
+                $issues = [];
+                if ($registration->status === 'pending') $issues[] = 'Menunggu keputusan verifikasi';
+                if ($registration->status === 'revision') $issues[] = 'Masih membutuhkan revisi';
+                if ($competition->participation_type === 'team') {
+                    if (! $registration->team_completed_at) $issues[] = 'Data tim belum ditandai lengkap';
+                    if ((int) $registration->members_count !== (int) $competition->team_size) {
+                        $issues[] = "Pemain tersimpan {$registration->members_count}/{$competition->team_size}";
+                    }
+                    if (! $registration->reviewed_by || ! $registration->reviewed_at) $issues[] = 'Belum diperiksa petugas';
+                }
+                $registration->setAttribute('force_majeure_issues', $issues ?: ['Belum memenuhi syarat drawing']);
+                return $registration;
+            });
+    }
+
     private function drawPayload(TournamentDraw $draw): TournamentDraw
     {
         return $draw->load([
             'operator:id,name','competition:id,title,slug',
-            'entries.registration:id,full_name,team_name,school_name',
-            'matches.participantA:id,full_name,team_name,school_name',
-            'matches.participantB:id,full_name,team_name,school_name',
-            'matches.winner:id,full_name,team_name,school_name',
+            'entries.registration:id,full_name,team_name,school_name,status',
+            'matches.participantA:id,full_name,team_name,school_name,status',
+            'matches.participantB:id,full_name,team_name,school_name,status',
+            'matches.winner:id,full_name,team_name,school_name,status',
         ]);
     }
 
@@ -56,9 +85,16 @@ class TournamentController extends Controller
         if(!$competition)return ['competitions'=>$options,'competition'=>null,'participants'=>[],'draw'=>null,'history'=>[]];
         $participants=$this->eligibleParticipants($competition)
             ->orderBy('full_name')->get(['id','ticket_code','full_name','team_name','school_name']);
+        $forceMajeureCandidates=$this->forceMajeureCandidates($competition);
         $draw=$competition->tournamentDraws()->latest('version')->first();
         return ['competitions'=>$options,'competition'=>$competition->only(['id','title','slug']),
-            'participants'=>$participants,'draw'=>$draw?$this->drawPayload($draw):null,
+            'participants'=>$participants,'force_majeure_candidates'=>$forceMajeureCandidates,
+            'drawing_readiness'=>[
+                'verified'=>$participants->count(),
+                'force_majeure_candidates'=>$forceMajeureCandidates->count(),
+                'rejected'=>Registration::where('competition_id',$competition->id)->where('status','rejected')->count(),
+            ],
+            'draw'=>$draw?$this->drawPayload($draw):null,
             'history'=>$competition->tournamentDraws()->with('operator:id,name')->latest('version')->get(['id','competition_id','operator_id','version','mode','format','status','drawn_at','locked_at'])];
     }
 
@@ -71,20 +107,62 @@ class TournamentController extends Controller
             'seeded_ids'=>'nullable|array','seeded_ids.*'=>'integer',
             'host_ids'=>'nullable|array','host_ids.*'=>'integer',
             'manual_order'=>'nullable|array','manual_order.*'=>'integer',
+            'manual_slots'=>'nullable|array|max:64','manual_slots.*'=>'nullable|integer',
+            'manual_groups'=>'nullable|array|max:16','manual_groups.*'=>'array','manual_groups.*.*'=>'integer',
             'avoid_same_school'=>'boolean','separate_seeds'=>'boolean','host_policy'=>'nullable|in:random,first,last',
             'group_count'=>'nullable|integer|min:2|max:16','third_place'=>'boolean',
+            'force_majeure_ids'=>'nullable|array|max:64','force_majeure_ids.*'=>'distinct|integer',
+            'force_majeure_reason'=>'nullable|string|max:1000',
         ]);
         $latest=$competition->tournamentDraws()->latest('version')->first();
         abort_if($latest?->status==='locked',422,'Drawing telah dikunci dan tidak dapat diulang.');
-        $participants=$this->eligibleParticipants($competition)->get(['id','full_name','team_name','school_name']);
-        abort_if($participants->count()<2,422,'Minimal dua peserta terverifikasi diperlukan untuk drawing.');
+        $forceMajeureIds=collect($data['force_majeure_ids']??[])->map(fn($id)=>(int)$id)->unique()->values();
+        $forceMajeureCandidates=$this->forceMajeureCandidates($competition)->keyBy('id');
+        abort_if($forceMajeureIds->diff($forceMajeureCandidates->keys())->isNotEmpty(),422,'Pilihan force majeure tidak valid atau tim sudah ditolak.');
+        abort_if($forceMajeureIds->isNotEmpty()&&mb_strlen(trim((string)($data['force_majeure_reason']??'')))<10,422,'Alasan force majeure wajib diisi minimal 10 karakter.');
+        $participants=$this->eligibleParticipants($competition)->get(['id','full_name','team_name','school_name'])
+            ->concat($forceMajeureIds->map(fn($id)=>$forceMajeureCandidates[$id]))->unique('id')->values();
+        abort_if($participants->count()<2,422,'Minimal dua peserta terverifikasi atau peserta force majeure diperlukan untuk drawing.');
         abort_if($participants->count()>64,422,'Maksimal 64 peserta dalam satu drawing.');
         $ids=$participants->pluck('id');
         foreach(['seeded_ids','host_ids','manual_order'] as $key)if(collect($data[$key]??[])->diff($ids)->isNotEmpty())return response()->json(['message'=>'Daftar peserta drawing tidak valid.'],422);
-        if($data['mode']==='manual'&&collect($data['manual_order']??[])->sort()->values()->all()!==$ids->sort()->values()->all())return response()->json(['message'=>'Urutan manual harus memuat seluruh peserta tepat satu kali.'],422);
+        if($data['format']==='groups_knockout'){
+            $groupCount=(int)($data['group_count']??2);
+            abort_if($groupCount>$participants->count()/2,422,'Setiap grup harus berisi minimal dua peserta. Kurangi jumlah grup.');
+        }
+        if($data['mode']==='manual'){
+            if(in_array($data['format'],['single_elimination','double_elimination'],true)){
+                $manualSlots=collect($data['manual_slots']??[]);
+                $placed=$manualSlots->filter(fn($id)=>$id!==null)->map(fn($id)=>(int)$id)->values();
+                abort_if($manualSlots->count()!==$this->bracketSize($participants->count()),422,'Jumlah slot manual harus sesuai ukuran bracket.');
+                abort_if($placed->sort()->values()->all()!==$ids->map(fn($id)=>(int)$id)->sort()->values()->all(),422,'Slot manual harus memuat setiap peserta tepat satu kali; slot lainnya boleh BYE.');
+            }elseif($data['format']==='groups_knockout'){
+                $manualGroups=collect($data['manual_groups']??[]);
+                $groupCount=(int)($data['group_count']??2);
+                $placed=$manualGroups->flatten()->map(fn($id)=>(int)$id)->values();
+                abort_if($manualGroups->count()!==$groupCount,422,'Jumlah kelompok manual harus sama dengan jumlah grup.');
+                abort_if($manualGroups->contains(fn($group)=>count($group)<2),422,'Setiap grup manual harus berisi minimal dua peserta.');
+                abort_if($placed->sort()->values()->all()!==$ids->map(fn($id)=>(int)$id)->sort()->values()->all(),422,'Kelompok manual harus memuat setiap peserta tepat satu kali.');
+            }elseif(collect($data['manual_order']??[])->map(fn($id)=>(int)$id)->sort()->values()->all()!==$ids->map(fn($id)=>(int)$id)->sort()->values()->all()){
+                return response()->json(['message'=>'Urutan manual harus memuat seluruh peserta tepat satu kali.'],422);
+            }
+        }
 
-        $draw=DB::transaction(function()use($request,$competition,$data,$participants,$latest){
-            $settings=collect($data)->except(['mode','format','manual_order'])->all();
+        $draw=DB::transaction(function()use($request,$competition,$data,$participants,$latest,$forceMajeureIds,$forceMajeureCandidates){
+            $settings=collect($data)->except(['mode','format','force_majeure_ids','force_majeure_reason'])->all();
+            if($forceMajeureIds->isNotEmpty())$settings['force_majeure']=[
+                'registration_ids'=>$forceMajeureIds->all(),
+                'reason'=>trim($data['force_majeure_reason']),
+                'approved_by'=>['id'=>$request->user()->id,'name'=>$request->user()->name],
+                'approved_at'=>now()->toIso8601String(),
+                'teams'=>$forceMajeureIds->map(function($id)use($forceMajeureCandidates){$candidate=$forceMajeureCandidates[$id];return [
+                    'registration_id'=>$candidate->id,
+                    'ticket_code'=>$candidate->ticket_code,
+                    'name'=>$candidate->team_name?:$candidate->full_name,
+                    'status'=>$candidate->status,
+                    'issues'=>$candidate->force_majeure_issues,
+                ];})->all(),
+            ];
             $draw=$competition->tournamentDraws()->create(['operator_id'=>$request->user()->id,'version'=>($latest?->version??0)+1,'mode'=>$data['mode'],'format'=>$data['format'],'settings'=>$settings,'drawn_at'=>now()]);
             $ordered=$this->orderParticipants($participants,$data);
             if(in_array($data['format'],['round_robin','round_robin_full','groups_knockout'],true))$this->createGroupDraw($draw,$ordered,$data);
@@ -97,14 +175,18 @@ class TournamentController extends Controller
     private function orderParticipants(Collection $participants,array $data): Collection
     {
         $byId=$participants->keyBy('id');
-        if($data['mode']==='manual')$ordered=collect($data['manual_order'])->map(fn($id)=>$byId[$id]);
+        if($data['mode']==='manual'){
+            $manualIds=isset($data['manual_slots'])?collect($data['manual_slots'])->filter(fn($id)=>$id!==null)
+                :(isset($data['manual_groups'])?collect($data['manual_groups'])->flatten():collect($data['manual_order']??[]));
+            $ordered=$manualIds->map(fn($id)=>$byId[$id]);
+        }
         elseif($data['mode']==='seeded'){
             $seeds=collect($data['seeded_ids']??[])->unique()->filter(fn($id)=>$byId->has($id))->map(fn($id)=>$byId[$id]);
             $ordered=$seeds->concat($participants->whereNotIn('id',$seeds->pluck('id'))->shuffle());
         }else $ordered=$participants->shuffle();
         $hosts=collect($data['host_ids']??[]);
-        if(($data['host_policy']??'random')==='first')$ordered=$ordered->sortByDesc(fn($p)=>$hosts->contains($p->id))->values();
-        if(($data['host_policy']??'random')==='last')$ordered=$ordered->sortBy(fn($p)=>$hosts->contains($p->id))->values();
+        if($data['mode']!=='manual'&&($data['host_policy']??'random')==='first')$ordered=$ordered->sortByDesc(fn($p)=>$hosts->contains($p->id))->values();
+        if($data['mode']!=='manual'&&($data['host_policy']??'random')==='last')$ordered=$ordered->sortBy(fn($p)=>$hosts->contains($p->id))->values();
         return $ordered->values();
     }
 
@@ -115,15 +197,21 @@ class TournamentController extends Controller
 
     private function createBracketDraw(TournamentDraw $draw,Collection $participants,array $settings): void
     {
-        $size=$this->bracketSize($participants->count());$byeCount=$size-$participants->count();$byeSlots=[];
-        for($i=0;$i<$byeCount;$i++){$slot=(int)floor($i*$size/max($byeCount,1));if($slot%2)$slot--;while(in_array($slot,$byeSlots,true))$slot=($slot+2)%$size;$byeSlots[]=$slot;}
-        $slots=array_fill(0,$size,null);$remaining=$participants->values();
-        $seedCount=min(collect($settings['seeded_ids']??[])->count(),$remaining->count());
-        if(($settings['separate_seeds']??false)&&$seedCount>1){
-            for($i=0;$i<$seedCount;$i++){$candidate=(int)floor($i*$size/$seedCount);while(in_array($candidate,$byeSlots,true)||$slots[$candidate])$candidate=($candidate+1)%$size;$slots[$candidate]=$remaining->shift();}
+        $size=$this->bracketSize($participants->count());
+        if($draw->mode==='manual'&&isset($settings['manual_slots'])){
+            $byId=$participants->keyBy('id');
+            $slots=collect($settings['manual_slots'])->map(fn($id)=>$id===null?null:$byId[(int)$id])->all();
+        }else{
+            $byeCount=$size-$participants->count();$byeSlots=[];
+            for($i=0;$i<$byeCount;$i++){$slot=(int)floor($i*$size/max($byeCount,1));if($slot%2)$slot--;while(in_array($slot,$byeSlots,true))$slot=($slot+2)%$size;$byeSlots[]=$slot;}
+            $slots=array_fill(0,$size,null);$remaining=$participants->values();
+            $seedCount=min(collect($settings['seeded_ids']??[])->count(),$remaining->count());
+            if(($settings['separate_seeds']??false)&&$seedCount>1){
+                for($i=0;$i<$seedCount;$i++){$candidate=(int)floor($i*$size/$seedCount);while(in_array($candidate,$byeSlots,true)||$slots[$candidate])$candidate=($candidate+1)%$size;$slots[$candidate]=$remaining->shift();}
+            }
+            foreach(range(0,$size-1) as $slot)if(!in_array($slot,$byeSlots,true)&&!$slots[$slot])$slots[$slot]=$remaining->shift();
+            if(($settings['avoid_same_school']??false))$this->separateSameSchool($slots);
         }
-        foreach(range(0,$size-1) as $slot)if(!in_array($slot,$byeSlots,true)&&!$slots[$slot])$slots[$slot]=$remaining->shift();
-        if(($settings['avoid_same_school']??false))$this->separateSameSchool($slots);
         $seedIds=collect($settings['seeded_ids']??[])->values();
         foreach($slots as $index=>$participant)$draw->entries()->create(['registration_id'=>$participant?->id,'slot_number'=>$index+1,'seed_number'=>$participant?($seedIds->search($participant->id)!==false?$seedIds->search($participant->id)+1:null):null,'is_bye'=>!$participant]);
         $this->createEliminationMatches($draw,$slots,$settings,$draw->format==='double_elimination');
@@ -174,8 +262,14 @@ class TournamentController extends Controller
 
     private function createGroupDraw(TournamentDraw $draw,Collection $participants,array $settings): void
     {
-        $groupCount=$draw->format==='groups_knockout'?(int)($settings['group_count']??2):1;$groups=array_fill(0,$groupCount,[]);
-        foreach($participants as $i=>$participant)$groups[$i%$groupCount][]=$participant;
+        $groupCount=$draw->format==='groups_knockout'?(int)($settings['group_count']??2):1;
+        if($draw->mode==='manual'&&$draw->format==='groups_knockout'&&isset($settings['manual_groups'])){
+            $byId=$participants->keyBy('id');
+            $groups=collect($settings['manual_groups'])->map(fn($group)=>collect($group)->map(fn($id)=>$byId[(int)$id])->all())->all();
+        }else{
+            $groups=array_fill(0,$groupCount,[]);
+            foreach($participants as $i=>$participant)$groups[$i%$groupCount][]=$participant;
+        }
         $slot=1;$number=1;
         foreach($groups as $groupIndex=>$members){$name=$groupCount===1?'Liga':'Grup '.chr(65+$groupIndex);foreach($members as $participant)$draw->entries()->create(['registration_id'=>$participant->id,'slot_number'=>$slot++,'group_name'=>$name]);
             for($i=0;$i<count($members);$i++)for($j=$i+1;$j<count($members);$j++){$draw->matches()->create(['stage'=>'group','round_number'=>1,'round_label'=>$name,'group_name'=>$name,'match_number'=>$number++,'participant_a_id'=>$members[$i]->id,'participant_b_id'=>$members[$j]->id]);if($draw->format==='round_robin_full')$draw->matches()->create(['stage'=>'group','round_number'=>2,'round_label'=>$name.' Putaran 2','group_name'=>$name,'match_number'=>$number++,'participant_a_id'=>$members[$j]->id,'participant_b_id'=>$members[$i]->id]);}}
