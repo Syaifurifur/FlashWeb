@@ -240,8 +240,10 @@ class ManagementController extends Controller
         $sessions = collect($data['sessions'] ?? [])->map(function (array $session) use ($data, $legacyTimeline, $legacyDeadline, $legacyFee) {
             $venue = ! empty($session['venue_id']) ? CompetitionVenue::find($session['venue_id']) : null;
             if ($venue && $venue->event_edition_id !== EventEdition::resolveCurrent()->id) abort(422, 'Kota pelaksanaan harus berasal dari tahun yang sedang dipilih.');
-            $picIds = collect($session['pic_ids'] ?? [($session['pic_user_id'] ?? $venue?->pic_user_id)])->filter()->map(fn ($id) => (int) $id)->unique()->values();
-            $supervisorIds = collect($session['supervisor_ids'] ?? [($session['supervisor_user_id'] ?? $venue?->supervisor_user_id)])->filter()->map(fn ($id) => (int) $id)->unique()->values();
+            // Kampus hanya menentukan kota dan venue. PIC/SPV wajib berasal dari
+            // pilihan pengguna pada sesi lomba, bukan petugas bawaan master kampus.
+            $picIds = collect($session['pic_ids'] ?? [($session['pic_user_id'] ?? null)])->filter()->map(fn ($id) => (int) $id)->unique()->values();
+            $supervisorIds = collect($session['supervisor_ids'] ?? [($session['supervisor_user_id'] ?? null)])->filter()->map(fn ($id) => (int) $id)->unique()->values();
             $picSlots = (int) ($session['pic_slots'] ?? max(1, $picIds->count()));
             $supervisorSlots = (int) ($session['supervisor_slots'] ?? max(1, $supervisorIds->count()));
             $cityName = $venue?->city ?? ($session['city'] ?? 'kota ini');

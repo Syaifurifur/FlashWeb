@@ -108,6 +108,7 @@ Route::middleware('api.auth')->group(function () {
         Route::post('/manage/tournaments/draws/{draw}/lock', [TournamentController::class, 'lock']);
         Route::get('/manage/schedules', [ScheduleController::class, 'manage']);
         Route::put('/manage/schedules/competitions/{competition}/venues', [ScheduleController::class, 'configureVenues']);
+        Route::post('/manage/schedules/competitions/{competition}/generate', [ScheduleController::class, 'generate']);
         Route::put('/manage/schedules/matches/{match}', [ScheduleController::class, 'updateMatch']);
         Route::post('/manage/schedules/competitions/{competition}/blocks', [ScheduleController::class, 'storeBlock']);
         Route::put('/manage/schedules/blocks/{block}', [ScheduleController::class, 'updateBlock']);

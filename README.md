@@ -56,6 +56,9 @@ Setiap perubahan fitur, skema database, API, hak akses, atau alur pengguna wajib
 
 ## Changelog
 
+- Pemilihan kampus pada formulir lomba kini hanya mengisi kota dan venue; PIC serta SPV tidak lagi tercentang otomatis dari master kampus dan wajib dipilih langsung oleh pengguna.
+- Menambahkan pembuatan jadwal pertandingan otomatis dan manual: panitia dapat memilih rentang tanggal/jam WIB, durasi, jeda, jumlah hari, dan lapangan untuk penyusunan otomatis bebas benturan, atau mengatur pertandingan lewat drag-and-drop dan editor detail; pertandingan aktif/selesai dilindungi serta perubahan dapat mengirim notifikasi peserta.
+- Menetapkan seluruh tanggal-jam aplikasi menggunakan zona Asia/Jakarta (GMT+7): input admin diperlakukan sebagai WIB, waktu disimpan terstandardisasi dalam UTC, serta label WIB ditampilkan konsisten pada deadline, agenda kota, notifikasi, drawing, timeline jadwal, dan halaman publik.
 - Menambahkan pemeriksaan dokumen khusus petugas: tombol kartu pelajar, pas foto, dokumen sekolah, karya, dan bukti pembayaran tetap tampil; file yang tersedia dibuka normal, sedangkan tombol file yang belum di-upload menampilkan popup spesifik tanpa membuka tautan kosong.
 - Popup kesalahan dan dokumen kosong kini langsung menerima fokus, menahan navigasi keyboard di dalam dialog, dapat ditutup dengan Esc, mengembalikan fokus ke tombol pemicu, serta menyesuaikan tampilan ponsel, tablet, desktop, layar pendek, dan safe area perangkat.
 - Drawing mendukung keputusan force majeure untuk tim pending/revisi/belum lengkap, dengan alasan wajib, larangan memasukkan tim ditolak, penanda pada slot, dan audit operator serta waktu keputusan. Seeder `DrawingDemoSeeder` menyiapkan skenario 6 tim terverifikasi, 2 kandidat force majeure, dan 1 tim ditolak.

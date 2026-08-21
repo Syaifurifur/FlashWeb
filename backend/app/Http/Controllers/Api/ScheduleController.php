@@ -12,10 +12,12 @@ use App\Models\EventEdition;
 use App\Models\CompetitionResult;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class ScheduleController extends Controller
 {
     private const STATUSES = ['unscheduled','upcoming','check_in','ongoing','delayed','completed','walkover','cancelled','bye'];
+    private const TIMEZONE = 'Asia/Jakarta';
 
     private function competitions(Request $request)
     {
@@ -50,6 +52,9 @@ class ScheduleController extends Controller
 
         return [
             'competition' => [...$competition->only(['id','title','slug','category','event_date']), 'venues' => $this->venues($competition)],
+            'timezone' => self::TIMEZONE,
+            'timezone_label' => 'WIB',
+            'utc_offset' => '+07:00',
             'draw' => $draw?->only(['id','version','format','status','locked_at']),
             'matches' => $matches,
             'blocks' => $blocks,
@@ -77,6 +82,134 @@ class ScheduleController extends Controller
         return $this->payload($competition->fresh(), $competition->tournamentDraws()->latest('version')->first());
     }
 
+    public function generate(Request $request, Competition $competition)
+    {
+        $this->authorizeCompetition($request, $competition);
+        $data = $request->validate([
+            'start_date' => 'required|date',
+            'start_time' => 'required|date_format:H:i',
+            'end_time' => 'required|date_format:H:i|after:start_time',
+            'duration_minutes' => 'required|integer|min:5|max:720',
+            'gap_minutes' => 'nullable|integer|min:0|max:240',
+            'max_days' => 'nullable|integer|min:1|max:31',
+            'venues' => 'required|array|min:1|max:20',
+            'venues.*' => 'required|string|max:160|distinct',
+            'replace_existing' => 'sometimes|boolean',
+            'notify' => 'sometimes|boolean',
+        ]);
+
+        $configuredVenues = collect($this->venues($competition));
+        $venues = collect($data['venues'])->values();
+        abort_if($venues->diff($configuredVenues)->isNotEmpty(), 422, 'Pilihan lapangan tidak tersedia pada lomba ini.');
+
+        $draw = $competition->tournamentDraws()->latest('version')->first();
+        abort_unless($draw, 422, 'Buat drawing dan bagan terlebih dahulu sebelum membuat jadwal otomatis.');
+
+        $matches = $draw->matches()->orderBy('round_number')->orderBy('match_number')->get();
+        $replaceExisting = (bool)($data['replace_existing'] ?? false);
+        $immutableStatuses = ['completed', 'walkover', 'bye', 'cancelled', 'check_in', 'ongoing'];
+        $targets = $matches->filter(function (TournamentMatch $match) use ($replaceExisting, $immutableStatuses) {
+            if (!$match->participant_a_id || !$match->participant_b_id || in_array($match->status, $immutableStatuses, true)) return false;
+            return $replaceExisting || !$match->scheduled_at || $match->status === 'unscheduled';
+        })->values();
+
+        abort_if($targets->isEmpty(), 422, 'Tidak ada pertandingan siap yang perlu dijadwalkan. Pertandingan dengan peserta yang belum diketahui akan menunggu hasil babak sebelumnya.');
+
+        $targetIds = $targets->pluck('id');
+        $fixedMatches = $matches->reject(fn (TournamentMatch $match) => $targetIds->contains($match->id) || !$match->scheduled_at)->values();
+        $blocks = $competition->scheduleBlocks()->where(function ($query) use ($draw) {
+            $query->whereNull('tournament_draw_id')->orWhere('tournament_draw_id', $draw->id);
+        })->get();
+
+        $duration = (int)$data['duration_minutes'];
+        $gap = (int)($data['gap_minutes'] ?? 0);
+        $maxDays = (int)($data['max_days'] ?? 1);
+        $firstDay = Carbon::parse($data['start_date'], self::TIMEZONE)->startOfDay();
+        $slots = collect();
+        for ($dayOffset = 0; $dayOffset < $maxDays; $dayOffset++) {
+            $date = $firstDay->copy()->addDays($dayOffset)->format('Y-m-d');
+            $cursor = Carbon::parse("{$date} {$data['start_time']}", self::TIMEZONE);
+            $dayEnd = Carbon::parse("{$date} {$data['end_time']}", self::TIMEZONE);
+            while ($cursor->copy()->addMinutes($duration)->lte($dayEnd)) {
+                $slots->push($cursor->copy()->utc());
+                $cursor->addMinutes($duration + $gap);
+            }
+        }
+        abort_if($slots->isEmpty(), 422, 'Rentang waktu harian terlalu pendek untuk durasi pertandingan yang dipilih.');
+
+        $planned = collect();
+        foreach ($targets as $match) {
+            $placement = null;
+            foreach ($slots as $start) {
+                $end = $start->copy()->addMinutes($duration);
+                foreach ($venues as $venue) {
+                    if ($this->automaticSlotAvailable($match, $start, $end, $venue, $fixedMatches, $blocks, $planned, $gap)) {
+                        $placement = ['match' => $match, 'start' => $start->copy(), 'end' => $end, 'venue' => $venue];
+                        break 2;
+                    }
+                }
+            }
+            abort_unless($placement, 422, 'Kapasitas jadwal tidak cukup. Tambah jumlah hari/lapangan, perpanjang jam operasional, atau kurangi durasi dan jeda pertandingan.');
+            $planned->push($placement);
+        }
+
+        DB::transaction(function () use ($planned, $duration) {
+            foreach ($planned as $item) {
+                $item['match']->update([
+                    'scheduled_at' => $item['start'],
+                    'venue' => $item['venue'],
+                    'duration_minutes' => $duration,
+                    'status' => 'upcoming',
+                ]);
+            }
+        });
+
+        $firstStart = $planned->sortBy(fn ($item) => $item['start']->timestamp)->first()['start'];
+        $lastEnd = $planned->sortByDesc(fn ($item) => $item['end']->timestamp)->first()['end'];
+
+        if ($request->boolean('notify')) {
+            CompetitionNotification::create([
+                'competition_id' => $competition->id,
+                'author_id' => $request->user()->id,
+                'title' => 'Jadwal Pertandingan Telah Dibuat',
+                'message' => $planned->count().' pertandingan dijadwalkan otomatis pada '.$firstStart->copy()->timezone(self::TIMEZONE)->format('d M Y H:i').' WIB sampai '.$lastEnd->copy()->timezone(self::TIMEZONE)->format('d M Y H:i').' WIB.',
+                'published_at' => now(),
+            ]);
+        }
+
+        return [
+            ...$this->payload($competition->fresh(), $draw->fresh()),
+            'automation' => [
+                'scheduled_count' => $planned->count(),
+                'waiting_count' => $matches->filter(fn ($match) => !$match->participant_a_id || !$match->participant_b_id)->count(),
+                'start_at' => $firstStart->toIso8601String(),
+                'end_at' => $lastEnd->toIso8601String(),
+            ],
+        ];
+    }
+
+    private function automaticSlotAvailable(TournamentMatch $candidate, Carbon $start, Carbon $end, string $venue, $fixedMatches, $blocks, $planned, int $gap): bool
+    {
+        $candidateParticipants = array_filter([$candidate->participant_a_id, $candidate->participant_b_id]);
+        foreach ($fixedMatches as $other) {
+            $otherStart = $other->scheduled_at;
+            $otherEnd = $otherStart->copy()->addMinutes((int)($other->duration_minutes ?: 60));
+            if ($venue === $other->venue && $this->overlaps([$start, $end->copy()->addMinutes($gap)], [$otherStart, $otherEnd->copy()->addMinutes($gap)])) return false;
+            $shared = array_intersect($candidateParticipants, array_filter([$other->participant_a_id, $other->participant_b_id]));
+            if ($shared && $this->overlaps([$start, $end->copy()->addMinutes($gap)], [$otherStart, $otherEnd->copy()->addMinutes($gap)])) return false;
+        }
+        foreach ($blocks as $block) {
+            $blockInterval = $this->interval($block, 'starts_at');
+            if ($venue === $block->venue && $blockInterval && $this->overlaps([$start, $end], $blockInterval)) return false;
+        }
+        foreach ($planned as $other) {
+            if ($venue === $other['venue'] && $this->overlaps([$start, $end->copy()->addMinutes($gap)], [$other['start'], $other['end']->copy()->addMinutes($gap)])) return false;
+            $shared = array_intersect($candidateParticipants, array_filter([$other['match']->participant_a_id, $other['match']->participant_b_id]));
+            if ($shared && $this->overlaps([$start, $end->copy()->addMinutes($gap)], [$other['start'], $other['end']->copy()->addMinutes($gap)])) return false;
+        }
+        return true;
+    }
+
     public function updateMatch(Request $request, TournamentMatch $match)
     {
         $match->load('tournamentDraw.competition');
@@ -96,6 +229,10 @@ class ScheduleController extends Controller
         } elseif (!in_array($data['status'], ['cancelled','bye'], true)) {
             abort_unless(!empty($data['scheduled_at']) && !empty($data['venue']), 422, 'Waktu dan lapangan harus diisi untuk status pertandingan ini.');
         }
+
+        // Input datetime-local dari panel selalu dibaca sebagai waktu Jakarta,
+        // sedangkan database tetap menyimpan waktu UTC agar tidak ambigu.
+        if (!empty($data['scheduled_at'])) $data['scheduled_at'] = $this->jakartaToUtc($data['scheduled_at']);
 
         if ($data['status'] === 'completed') {
             abort_unless($match->participant_a_id && $match->participant_b_id, 422, 'Peserta pertandingan belum lengkap.');
@@ -163,7 +300,14 @@ class ScheduleController extends Controller
 
     private function validateBlock(Request $request): array
     {
-        return $request->validate(['title' => 'required|string|max:120', 'venue' => 'required|string|max:160', 'starts_at' => 'required|date', 'duration_minutes' => 'required|integer|min:5|max:720', 'notes' => 'nullable|string|max:1000', 'force' => 'sometimes|boolean']);
+        $data = $request->validate(['title' => 'required|string|max:120', 'venue' => 'required|string|max:160', 'starts_at' => 'required|date', 'duration_minutes' => 'required|integer|min:5|max:720', 'notes' => 'nullable|string|max:1000', 'force' => 'sometimes|boolean']);
+        $data['starts_at'] = $this->jakartaToUtc($data['starts_at']);
+        return $data;
+    }
+
+    private function jakartaToUtc(string $value): Carbon
+    {
+        return Carbon::parse($value, self::TIMEZONE)->utc();
     }
 
     private function interval($item, string $startField = 'scheduled_at'): ?array

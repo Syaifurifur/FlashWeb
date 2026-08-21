@@ -474,11 +474,12 @@ class EventManagementTest extends TestCase
         ])->assertCreated();
         $this->withToken('pic-jadwal-token')->postJson('/api/manage/tournaments/draws/'.$draw->json('id').'/lock')->assertOk();
         $matches=TournamentMatch::where('tournament_draw_id',$draw->json('id'))->whereNotNull('participant_a_id')->whereNotNull('participant_b_id')->take(2)->get();
-        $startsAt=now()->addDay()->setTime(8,0)->format('Y-m-d H:i:s');
+        $startsAt='2030-01-15 08:00:00';
 
         $this->withToken('pic-jadwal-token')->putJson('/api/manage/schedules/matches/'.$matches[0]->id,[
             'scheduled_at'=>$startsAt,'venue'=>'Lapangan Utama','duration_minutes'=>60,'status'=>'upcoming','notify'=>true,
         ])->assertOk();
+        $this->assertDatabaseHas('tournament_matches',['id'=>$matches[0]->id,'scheduled_at'=>'2030-01-15 01:00:00']);
         $this->assertDatabaseHas('competition_notifications',['competition_id'=>$competition->id,'title'=>'Pembaruan Jadwal Match '.$matches[0]->match_number]);
 
         $this->withToken('pic-jadwal-token')->putJson('/api/manage/schedules/matches/'.$matches[1]->id,[
@@ -489,10 +490,78 @@ class EventManagementTest extends TestCase
         ])->assertOk()->assertJsonCount(1,'conflicts');
 
         $this->withToken('pic-jadwal-token')->postJson('/api/manage/schedules/competitions/'.$competition->id.'/blocks',[
-            'title'=>'Istirahat','venue'=>'Lapangan 2','starts_at'=>now()->addDay()->setTime(12,0)->format('Y-m-d H:i:s'),'duration_minutes'=>60,
+            'title'=>'Istirahat','venue'=>'Lapangan 2','starts_at'=>'2030-01-15 12:00:00','duration_minutes'=>60,
         ])->assertCreated()->assertJsonCount(1,'blocks');
+        $this->assertDatabaseHas('tournament_schedule_blocks',['competition_id'=>$competition->id,'starts_at'=>'2030-01-15 05:00:00']);
         $this->getJson('/api/competitions/'.$competition->slug.'/schedule')->assertOk()
-            ->assertJsonPath('draw.id',$draw->json('id'))->assertJsonCount(1,'blocks');
+            ->assertJsonPath('draw.id',$draw->json('id'))->assertJsonPath('timezone','Asia/Jakarta')
+            ->assertJsonPath('timezone_label','WIB')->assertJsonPath('utc_offset','+07:00')->assertJsonCount(1,'blocks');
+    }
+
+    public function test_panitia_generates_automatic_schedule_in_wib_with_gap_capacity_and_status_protection(): void
+    {
+        $competition=$this->competition();
+        $competition->update(['schedule_venues'=>['Lapangan 1','Lapangan 2']]);
+        User::create(['name'=>'PIC Jadwal Otomatis','email'=>'pic-jadwal-otomatis@test.id','password'=>'password123','role'=>'pic','competition_id'=>$competition->id,'api_token'=>hash('sha256','pic-jadwal-otomatis-token')]);
+        foreach(range(1,4) as $number) Registration::create([
+            'competition_id'=>$competition->id,'ticket_code'=>'AUTO-SCHEDULE-'.$number,'full_name'=>'Peserta Otomatis '.$number,
+            'whatsapp'=>'08128888'.str_pad($number,4,'0',STR_PAD_LEFT),'email'=>'auto-schedule'.$number.'@test.id','birth_place'=>'Jakarta','birth_date'=>'2009-01-01',
+            'grade'=>'XI','nisn'=>(string)(7100000000+$number),'mother_name'=>'Ibu','school_name'=>'Sekolah Otomatis '.$number,
+            'teacher_name'=>'Guru','teacher_contact'=>'081298765432','student_card_path'=>'a.pdf','delegation_letter_path'=>'b.pdf','photo_path'=>'c.jpg','consent'=>true,'status'=>'approved',
+        ]);
+        $participantIds=Registration::where('competition_id',$competition->id)->orderBy('id')->pluck('id')->all();
+        $draw=$this->withToken('pic-jadwal-otomatis-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
+            'mode'=>'manual','format'=>'round_robin','manual_order'=>$participantIds,
+        ])->assertCreated();
+        $this->withToken('pic-jadwal-otomatis-token')->postJson('/api/manage/schedules/competitions/'.$competition->id.'/blocks',[
+            'title'=>'Persiapan Lapangan','venue'=>'Lapangan 1','starts_at'=>'2030-02-10 08:00:00','duration_minutes'=>60,
+        ])->assertCreated();
+
+        $payload=[
+            'start_date'=>'2030-02-10','start_time'=>'08:00','end_time'=>'17:00',
+            'duration_minutes'=>60,'gap_minutes'=>30,'max_days'=>1,
+            'venues'=>['Lapangan 1','Lapangan 2'],'notify'=>true,
+        ];
+        $this->withToken('pic-jadwal-otomatis-token')->postJson('/api/manage/schedules/competitions/'.$competition->id.'/generate',$payload)
+            ->assertOk()->assertJsonPath('automation.scheduled_count',6)->assertJsonPath('automation.waiting_count',0)
+            ->assertJsonPath('timezone','Asia/Jakarta')->assertJsonPath('timezone_label','WIB')->assertJsonCount(0,'conflicts');
+
+        $matches=TournamentMatch::where('tournament_draw_id',$draw->json('id'))->orderBy('match_number')->get();
+        $this->assertCount(6,$matches);
+        $this->assertSame('2030-02-10 01:00:00',$matches->min('scheduled_at')->format('Y-m-d H:i:s'));
+        $this->assertFalse($matches->contains(fn($match)=>$match->venue==='Lapangan 1' && $match->scheduled_at->format('Y-m-d H:i:s')==='2030-02-10 01:00:00'));
+        foreach($matches as $match) {
+            $this->assertNotNull($match->scheduled_at);
+            $this->assertContains($match->venue,['Lapangan 1','Lapangan 2']);
+            $this->assertSame('upcoming',$match->status);
+        }
+        foreach($matches as $index=>$match) foreach($matches->slice($index+1) as $other) {
+            $shared=array_intersect([$match->participant_a_id,$match->participant_b_id],[$other->participant_a_id,$other->participant_b_id]);
+            if(!$shared) continue;
+            $earlier=$match->scheduled_at->lte($other->scheduled_at) ? $match : $other;
+            $later=$earlier->is($match) ? $other : $match;
+            $this->assertGreaterThanOrEqual(
+                $earlier->scheduled_at->copy()->addMinutes($earlier->duration_minutes+30)->timestamp,
+                $later->scheduled_at->timestamp,
+                'Peserta yang sama harus memperoleh jeda minimal 30 menit.'
+            );
+        }
+        $this->assertDatabaseHas('competition_notifications',['competition_id'=>$competition->id,'title'=>'Jadwal Pertandingan Telah Dibuat']);
+
+        $protected=$matches->first();
+        $protected->update(['status'=>'check_in']);
+        $protectedAt=$protected->scheduled_at->format('Y-m-d H:i:s');
+        $this->withToken('pic-jadwal-otomatis-token')->postJson('/api/manage/schedules/competitions/'.$competition->id.'/generate',[
+            ...$payload,'start_date'=>'2030-02-11','replace_existing'=>true,'notify'=>false,
+        ])->assertOk()->assertJsonPath('automation.scheduled_count',5);
+        $this->assertDatabaseHas('tournament_matches',['id'=>$protected->id,'status'=>'check_in','scheduled_at'=>$protectedAt]);
+
+        $beforeFailure=TournamentMatch::where('tournament_draw_id',$draw->json('id'))->pluck('scheduled_at','id')->map(fn($value)=>(string)$value)->all();
+        $this->withToken('pic-jadwal-otomatis-token')->postJson('/api/manage/schedules/competitions/'.$competition->id.'/generate',[
+            ...$payload,'start_date'=>'2030-02-12','end_time'=>'09:00','venues'=>['Lapangan 1'],'replace_existing'=>true,'notify'=>false,
+        ])->assertUnprocessable()->assertJsonPath('message','Kapasitas jadwal tidak cukup. Tambah jumlah hari/lapangan, perpanjang jam operasional, atau kurangi durasi dan jeda pertandingan.');
+        $afterFailure=TournamentMatch::where('tournament_draw_id',$draw->json('id'))->pluck('scheduled_at','id')->map(fn($value)=>(string)$value)->all();
+        $this->assertSame($beforeFailure,$afterFailure);
     }
 
     public function test_super_admin_creates_role_with_checked_permissions(): void
@@ -1143,6 +1212,46 @@ class EventManagementTest extends TestCase
             'name'=>'PIC Belum Ditugaskan','email'=>'pic-belum-ditugaskan@test.id','whatsapp'=>'081234567820',
             'password'=>'','role'=>'pic','competition_id'=>$competition->id,'is_active'=>true,
         ])->assertOk()->assertJsonPath('competition_id', null);
+    }
+
+    public function test_selecting_campus_does_not_automatically_assign_pic_or_spv(): void
+    {
+        User::create([
+            'name'=>'Admin Pilih Petugas','email'=>'admin-pilih-petugas@test.id','password'=>'password123',
+            'role'=>'super_admin','api_token'=>hash('sha256','admin-pilih-petugas-token'),
+        ]);
+        $pic=User::create(['name'=>'PIC Bawaan Kampus','email'=>'pic-bawaan-kampus@test.id','whatsapp'=>'081234567830','password'=>'password123','role'=>'pic']);
+        $supervisor=User::create(['name'=>'SPV Bawaan Kampus','email'=>'spv-bawaan-kampus@test.id','whatsapp'=>'081234567831','password'=>'password123','role'=>'spv']);
+        $venue=CompetitionVenue::create([
+            'slug'=>'kampus-pilih-manual','name'=>'Kampus Pilih Manual','city'=>'Bekasi','address'=>'Jl. Pendidikan',
+            'activity_start_date'=>'2030-03-10','activity_end_date'=>'2030-03-11',
+            'pic_user_id'=>$pic->id,'supervisor_user_id'=>$supervisor->id,'is_active'=>true,
+        ]);
+        $payload=[
+            'title'=>'Lomba Pilih Petugas Manual','category'=>'Science Competition',
+            'short_description'=>'Petugas dipilih langsung oleh pengguna.','description'=>'Pemilihan kampus tidak menentukan petugas lomba.',
+            'guides'=>[['title'=>'Panduan','content'=>'Ikuti ketentuan yang berlaku.']],
+            'participation_type'=>'individual','team_size'=>1,'official_count'=>0,
+            'sessions'=>[[
+                'venue_id'=>$venue->id,'quota'=>20,'fee'=>0,'team_update_deadline_at'=>'2030-03-01 23:59:00',
+                'timeline'=>[['label'=>'Pelaksanaan','type'=>'single','date'=>'2030-03-10']],
+                'is_active'=>true,
+            ]],
+        ];
+
+        $this->withToken('admin-pilih-petugas-token')->postJson('/api/manage/competitions',array_replace_recursive($payload,[
+            'sessions'=>[array_merge($payload['sessions'][0],['pic_slots'=>1,'supervisor_slots'=>1,'pic_ids'=>[],'supervisor_ids'=>[]])],
+        ]))->assertUnprocessable()->assertJsonValidationErrors(['sessions.0.pic_ids','sessions.0.supervisor_ids']);
+
+        $response=$this->withToken('admin-pilih-petugas-token')->postJson('/api/manage/competitions',$payload)
+            ->assertCreated()->assertJsonPath('sessions.0.pic_user_id',null)
+            ->assertJsonPath('sessions.0.supervisor_user_id',null)
+            ->assertJsonCount(0,'sessions.0.pics')->assertJsonCount(0,'sessions.0.supervisors');
+        $this->assertDatabaseHas('competition_sessions',[
+            'competition_id'=>$response->json('id'),'venue_id'=>$venue->id,
+            'pic_user_id'=>null,'supervisor_user_id'=>null,
+        ]);
+        $this->assertDatabaseMissing('competition_session_staff',['competition_session_id'=>$response->json('sessions.0.id')]);
     }
 
     public function test_super_admin_can_manage_competition_venues(): void

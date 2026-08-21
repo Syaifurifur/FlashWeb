@@ -12,6 +12,7 @@ use App\Models\CompetitionResult;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Carbon\Carbon;
 
 class TournamentController extends Controller
 {
@@ -279,6 +280,7 @@ class TournamentController extends Controller
     {
         $this->authorizeCompetition($request,$match->tournamentDraw->competition);
         $data=$request->validate(['score_a'=>'nullable|numeric|min:0','score_b'=>'nullable|numeric|min:0','scheduled_at'=>'nullable|date','venue'=>'nullable|string|max:160','duration_minutes'=>'nullable|integer|min:5|max:720','status'=>'required|in:unscheduled,upcoming,check_in,ongoing,delayed,completed,walkover,cancelled,bye']);
+        if(!empty($data['scheduled_at']))$data['scheduled_at']=Carbon::parse($data['scheduled_at'],'Asia/Jakarta')->utc();
         if($data['status']==='completed'){
             abort_unless($match->participant_a_id&&$match->participant_b_id,422,'Peserta pertandingan belum lengkap.');
             if((float)$data['score_a']===(float)$data['score_b']){

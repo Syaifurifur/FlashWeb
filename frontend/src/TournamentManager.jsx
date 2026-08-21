@@ -3,7 +3,10 @@ import { AlertTriangle, ChevronDown, ChevronUp, Download, GripVertical, LockKeyh
 import { api } from './api'
 
 const nameOf = participant => participant?.team_name || participant?.full_name || 'BYE'
-const dateTime = value => value ? new Intl.DateTimeFormat('id-ID', {dateStyle: 'medium', timeStyle: 'short'}).format(new Date(value)) : 'Belum dijadwalkan'
+const jakartaDate = value => value ? new Intl.DateTimeFormat('en-CA', {timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit'}).format(new Date(value)) : ''
+const jakartaTime = value => value ? new Intl.DateTimeFormat('en-GB', {timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false}).format(new Date(value)) : ''
+const localDateTime = value => value ? `${jakartaDate(value)}T${jakartaTime(value)}` : ''
+const dateTime = value => value ? new Intl.DateTimeFormat('id-ID', {dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Jakarta'}).format(new Date(value))+' WIB' : 'Belum dijadwalkan'
 const formatLabels = {
   single_elimination: 'Single Elimination',
   double_elimination: 'Double Elimination',
@@ -39,7 +42,7 @@ function ManualGroupPlacement({groupCount, assignments, participants, moveToGrou
 function MatchEditor({match, reload, locked}) {
   const [scoreA, setScoreA] = useState(match.score_a ?? '')
   const [scoreB, setScoreB] = useState(match.score_b ?? '')
-  const [scheduled, setScheduled] = useState(match.scheduled_at ? String(match.scheduled_at).slice(0, 16) : '')
+  const [scheduled, setScheduled] = useState(localDateTime(match.scheduled_at))
   const [venue, setVenue] = useState(match.venue || '')
   const [busy, setBusy] = useState(false)
 
@@ -67,7 +70,7 @@ function MatchEditor({match, reload, locked}) {
       <span className={match.winner_id === match.participant_a_id ? 'font-black text-emerald-700' : 'font-bold'}>{nameOf(match.participant_a)}</span><input className="input py-2 text-center" type="number" min="0" value={scoreA} onChange={event => setScoreA(event.target.value)} disabled={locked || !match.participant_a_id}/>
       <span className={match.winner_id === match.participant_b_id ? 'font-black text-emerald-700' : 'font-bold'}>{nameOf(match.participant_b)}</span><input className="input py-2 text-center" type="number" min="0" value={scoreB} onChange={event => setScoreB(event.target.value)} disabled={locked || !match.participant_b_id}/>
     </div>
-    <div className="mt-3 grid gap-2 sm:grid-cols-2"><input className="input py-2 text-sm" type="datetime-local" value={scheduled} onChange={event => setScheduled(event.target.value)} disabled={locked}/><input className="input py-2 text-sm" value={venue} onChange={event => setVenue(event.target.value)} placeholder="Lapangan / lokasi" disabled={locked}/></div>
+    <div className="mt-3 grid gap-2 sm:grid-cols-2"><label><span className="label">Waktu (WIB)</span><input className="input py-2 text-sm" type="datetime-local" value={scheduled} onChange={event => setScheduled(event.target.value)} disabled={locked}/></label><label><span className="label">Lapangan / lokasi</span><input className="input py-2 text-sm" value={venue} onChange={event => setVenue(event.target.value)} placeholder="Lapangan / lokasi" disabled={locked}/></label></div>
     {!locked && <div className="mt-3 grid gap-2 sm:flex sm:justify-end"><button className="btn-ghost py-2 text-xs" disabled={busy} onClick={() => save('ongoing')}>Berlangsung</button><button className="btn-dark py-2 text-xs" disabled={busy || !match.participant_a_id || !match.participant_b_id} onClick={() => save('completed')}>Konfirmasi Skor</button></div>}
   </article>
 }
