@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Competition;
 use App\Models\SiteContent;
 use App\Models\EventEdition;
 use Illuminate\Http\Request;
@@ -124,6 +125,24 @@ class ContentController extends Controller
         return $this->stored(self::GENERAL_DOCUMENTS_KEY) ?: ['documents'=>[]];
     }
 
+    public function downloadGeneralDocument(int $document)
+    {
+        $documents = $this->generalDocuments()['documents'] ?? [];
+
+        return $this->downloadDocument($documents, $document);
+    }
+
+    public function downloadCompetitionDocument(Competition $competition, int $document)
+    {
+        abort_unless(
+            (int) $competition->event_edition_id === (int) EventEdition::resolveCurrent(true)->id,
+            404,
+            'Dokumen tidak ditemukan.'
+        );
+
+        return $this->downloadDocument($competition->downloadable_documents ?? [], $document);
+    }
+
     public function updateGeneralDocuments(Request $request)
     {
         $data = $request->validate([
@@ -157,6 +176,29 @@ class ContentController extends Controller
         $currentPaths->diff($retained)->each(fn ($path) => Storage::disk('public')->delete($path));
 
         return $this->save(self::GENERAL_DOCUMENTS_KEY, ['documents'=>$documents], $request);
+    }
+
+    private function downloadDocument(array $documents, int $index)
+    {
+        $document = $documents[$index] ?? null;
+        $path = is_array($document) ? ($document['file_path'] ?? null) : null;
+
+        abort_unless(
+            is_string($path) && $path !== '' && Storage::disk('public')->exists($path),
+            404,
+            'Dokumen tidak ditemukan atau file sudah tidak tersedia.'
+        );
+
+        $originalName = is_string($document['original_name'] ?? null)
+            ? basename(str_replace('\\', '/', $document['original_name']))
+            : basename($path);
+        $mimeType = Storage::disk('public')->mimeType($path) ?: 'application/octet-stream';
+
+        return Storage::disk('public')->download($path, $originalName, [
+            'Content-Type' => $mimeType,
+            'X-Content-Type-Options' => 'nosniff',
+            'Cache-Control' => 'private, no-store, max-age=0',
+        ]);
     }
 
     public function updateLandingExtras(Request $request)

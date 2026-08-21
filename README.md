@@ -56,6 +56,9 @@ Setiap perubahan fitur, skema database, API, hak akses, atau alur pengguna wajib
 
 ## Changelog
 
+### 2026-08-22
+
+- Memperbaiki upload dan download dokumen umum maupun dokumen lomba: file kini diunduh melalui endpoint tervalidasi dengan nama asli, MIME yang tepat, pemeriksaan keberadaan file, serta storage link yang benar sehingga peserta tidak lagi menerima halaman HTML yang tersimpan sebagai dokumen rusak.
 - Menambahkan TV Mode publik untuk menayangkan skor pertandingan berlangsung/selesai dan jadwal pertandingan berikutnya, lengkap dengan filter lapangan, jam WIB, layar penuh, refresh otomatis 15 detik, serta rotasi daftar setiap 10 detik.
 - Merancang ulang Manajemen Lomba menjadi dashboard pengeditan yang menampilkan ringkasan lomba/pendaftar/kota/kelengkapan, pencarian dan filter, penanda konfigurasi yang belum lengkap, serta akses langsung ke editor data-kota, panduan, format peserta, dokumen, dan pratinjau publik.
 - Menambahkan paging pada Data Pendaftar dengan pilihan 10, 20, 50, atau 100 baris per halaman, navigasi nomor/sebelumnya/berikutnya, ringkasan rentang data, serta reset halaman saat pencarian atau filter berubah.

@@ -1,5 +1,30 @@
-npm notice
-npm notice New major version of npm available! 11.16.0 -> 12.0.2
-npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.2
-npm notice To update run: npm install -g npm@12.0.2
-npm notice
+02.55.11 [vite] (client) [Unhandled rejection] ApplicationError: Sesi tidak valid atau telah berakhir.
+ > createApiError src/error-utils.js:36:16
+    34 |      ? 'Tidak dapat terhubung ke server. Periksa koneksi dan pastikan layanan aplikasi berjalan.'
+    35 |      : payload.message || 'Permintaan gagal diproses. Silakan coba kembali.'
+    36 |    const error = new Error(message, cause ? {cause} : undefined)
+       |                  ^
+    37 |    error.name = 'ApplicationError'
+    38 |    error.status = status
+ > api src/api.js:50:33
+
+02.56.20 [vite] (client) [Unhandled rejection] ApplicationError: Sesi tidak valid atau telah berakhir.
+ > createApiError src/error-utils.js:36:16
+    34 |      ? 'Tidak dapat terhubung ke server. Periksa koneksi dan pastikan layanan aplikasi berjalan.'
+    35 |      : payload.message || 'Permintaan gagal diproses. Silakan coba kembali.'
+    36 |    const error = new Error(message, cause ? {cause} : undefined)
+       |                  ^
+    37 |    error.name = 'ApplicationError'
+    38 |    error.status = status
+ > api src/api.js:50:18
+
+03.19.39 [vite] (client) [Unhandled rejection] ApplicationError: Sesi tidak valid atau telah berakhir.
+ > createApiError src/error-utils.js:36:16
+    34 |      ? 'Tidak dapat terhubung ke server. Periksa koneksi dan pastikan layanan aplikasi berjalan.'
+    35 |      : payload.message || 'Permintaan gagal diproses. Silakan coba kembali.'
+    36 |    const error = new Error(message, cause ? {cause} : undefined)
+       |                  ^
+    37 |    error.name = 'ApplicationError'
+    38 |    error.status = status
+ > api src/api.js:50:33
+
