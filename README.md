@@ -58,6 +58,7 @@ Setiap perubahan fitur, skema database, API, hak akses, atau alur pengguna wajib
 
 ### 2026-08-22
 
+- Menampilkan seluruh dokumen yang diunggah admin pada halaman Download Dokumen publik, mencakup dokumen umum dan dokumen khusus setiap cabang lomba dalam kelompok yang mudah ditemukan peserta.
 - Merapikan dashboard peserta dengan sidebar desktop, menu cepat di perangkat mobile, ringkasan progres, alur pendaftaran tiga tahap, dan tombol tindakan berikutnya yang lebih mudah ditemukan.
 - Menyederhanakan popup kesalahan validasi menjadi pesan langsung tentang masalah yang harus diperbaiki, termasuk mengubah batas file 2.048 kilobita menjadi pesan kapasitas 2 MB tanpa lokasi endpoint, ID error, atau detail debug.
 - Memperbaiki upload dan download dokumen umum maupun dokumen lomba: file kini diunduh melalui endpoint tervalidasi dengan nama asli, MIME yang tepat, pemeriksaan keberadaan file, serta storage link yang benar sehingga peserta tidak lagi menerima halaman HTML yang tersimpan sebagai dokumen rusak.
