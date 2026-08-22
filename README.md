@@ -58,6 +58,8 @@ Setiap perubahan fitur, skema database, API, hak akses, atau alur pengguna wajib
 
 ### 2026-08-22
 
+- Merapikan dashboard peserta dengan sidebar desktop, menu cepat di perangkat mobile, ringkasan progres, alur pendaftaran tiga tahap, dan tombol tindakan berikutnya yang lebih mudah ditemukan.
+- Menyederhanakan popup kesalahan validasi menjadi pesan langsung tentang masalah yang harus diperbaiki, termasuk mengubah batas file 2.048 kilobita menjadi pesan kapasitas 2 MB tanpa lokasi endpoint, ID error, atau detail debug.
 - Memperbaiki upload dan download dokumen umum maupun dokumen lomba: file kini diunduh melalui endpoint tervalidasi dengan nama asli, MIME yang tepat, pemeriksaan keberadaan file, serta storage link yang benar sehingga peserta tidak lagi menerima halaman HTML yang tersimpan sebagai dokumen rusak.
 - Menambahkan TV Mode publik untuk menayangkan skor pertandingan berlangsung/selesai dan jadwal pertandingan berikutnya, lengkap dengan filter lapangan, jam WIB, layar penuh, refresh otomatis 15 detik, serta rotasi daftar setiap 10 detik.
 - Merancang ulang Manajemen Lomba menjadi dashboard pengeditan yang menampilkan ringkasan lomba/pendaftar/kota/kelengkapan, pencarian dan filter, penanda konfigurasi yang belum lengkap, serta akses langsung ke editor data-kota, panduan, format peserta, dokumen, dan pratinjau publik.

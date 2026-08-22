@@ -22,9 +22,21 @@ const errorText = error => [
   `ID Error: ${error.errorId}`,
 ].join('\n')
 
+const conciseValidationMessage = (field, message) => {
+  const size = String(message).match(/maksimal\s+(\d+)\s+kilobita/i)
+  if (size) {
+    const megabytes = Number(size[1]) / 1024
+    const capacity = Number.isInteger(megabytes) ? megabytes : megabytes.toFixed(1)
+    return `${field.label} melewati kapasitas ${capacity} MB.`
+  }
+  return String(message).replace(/^\w/, letter => letter.toUpperCase())
+}
+
 function ErrorCard({error, close}) {
   const [copied, setCopied] = useState(false)
   const dialogRef = useDialogFocus(true, close)
+  const validation = error.code === 'VALIDATION_ERROR' || error.status === 422
+  const validationMessages = error.fields.flatMap(field => field.messages.map(message => conciseValidationMessage(field, message)))
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(errorText(error))
@@ -34,6 +46,20 @@ function ErrorCard({error, close}) {
       setCopied(false)
     }
   }
+
+  if (validation) return <div className="responsive-dialog-shell z-[200] bg-ink/65 backdrop-blur-sm">
+    <section ref={dialogRef} tabIndex="-1" role="alertdialog" aria-modal="true" aria-labelledby="validation-error-title" className="responsive-dialog-panel max-w-md border border-rose-200 bg-white p-5 shadow-2xl focus:outline-none focus-visible:ring-4 focus-visible:ring-rose-300 sm:p-6">
+      <div className="flex items-start gap-3">
+        <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-rose-600 text-white"><AlertTriangle size={21}/></span>
+        <div className="min-w-0 flex-1">
+          <h2 id="validation-error-title" className="font-display text-lg font-bold text-slate-900 sm:text-xl">{validationMessages.length===1?validationMessages[0]:'Periksa data berikut'}</h2>
+          {validationMessages.length>1&&<ul className="mt-3 grid gap-2 text-sm leading-6 text-slate-600">{validationMessages.map((message,index)=><li key={index} className="rounded-xl bg-rose-50 px-3 py-2">{message}</li>)}</ul>}
+          {!validationMessages.length&&<p className="mt-1 text-sm leading-6 text-slate-600">{error.message}</p>}
+        </div>
+        <button type="button" onClick={close} aria-label="Tutup pesan error" className="grid size-9 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-500"><X size={17}/></button>
+      </div>
+    </section>
+  </div>
 
   return <div className="responsive-dialog-shell z-[200] bg-ink/65 backdrop-blur-sm">
     <section ref={dialogRef} tabIndex="-1" role="alertdialog" aria-modal="true" aria-labelledby="application-error-title" aria-describedby="application-error-message" className="responsive-dialog-panel max-w-lg border border-rose-200 bg-white shadow-2xl focus:outline-none focus-visible:ring-4 focus-visible:ring-rose-300">
