@@ -108,6 +108,7 @@ Route::middleware('api.auth')->group(function () {
         Route::put('/manage/tournaments/matches/{match}', [TournamentController::class, 'updateMatch']);
         Route::post('/manage/tournaments/draws/{draw}/knockout', [TournamentController::class, 'generateKnockout']);
         Route::post('/manage/tournaments/draws/{draw}/lock', [TournamentController::class, 'lock']);
+        Route::post('/manage/tournaments/draws/{draw}/unlock', [TournamentController::class, 'unlock'])->middleware('role:super_admin');
         Route::get('/manage/schedules', [ScheduleController::class, 'manage']);
         Route::put('/manage/schedules/competitions/{competition}/venues', [ScheduleController::class, 'configureVenues']);
         Route::post('/manage/schedules/competitions/{competition}/generate', [ScheduleController::class, 'generate']);

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Competition;
+use App\Models\CompetitionSession;
 use App\Models\Registration;
 use App\Models\TournamentDraw;
 use App\Models\TournamentMatch;
@@ -26,9 +27,61 @@ class TournamentController extends Controller
         abort_unless($this->competitions($request)->whereKey($competition->id)->exists(),403);
     }
 
-    private function eligibleParticipants(Competition $competition)
+    private function accessibleSessions(Request $request, Competition $competition)
+    {
+        $query = $competition->sessions()->where('is_active', true);
+        $user = $request->user();
+        if ($user->role === 'super_admin' || $user->hasPermission('competitions.manage')) return $query;
+
+        $assignedIds = $user->assignedCompetitionSessions()
+            ->where('competition_sessions.competition_id', $competition->id)->pluck('competition_sessions.id');
+        return $assignedIds->isNotEmpty() ? $query->whereIn('competition_sessions.id', $assignedIds) : $query;
+    }
+
+    private function scopeOptions(Request $request): Collection
+    {
+        return $this->competitions($request)->orderBy('title')->get()->flatMap(function (Competition $competition) use ($request) {
+            $hasSessions = $competition->sessions()->exists();
+            $sessions = $this->accessibleSessions($request, $competition)->with('venueRecord:id,slug,city,name')->get();
+            if (! $hasSessions) return [[
+                'competition_id'=>$competition->id, 'session_id'=>null, 'competition_title'=>$competition->title,
+                'city'=>null, 'venue'=>null, 'label'=>$competition->title,
+            ]];
+            return $sessions->map(fn (CompetitionSession $session) => [
+                'competition_id'=>$competition->id, 'session_id'=>$session->id, 'competition_title'=>$competition->title,
+                'city'=>$session->city, 'venue'=>$session->venue, 'venue_slug'=>$session->venueRecord?->slug,
+                'label'=>$competition->title.' · '.$session->city,
+            ]);
+        })->values();
+    }
+
+    private function selectedScope(Request $request): ?array
+    {
+        $scopes = $this->scopeOptions($request);
+        if ($request->filled('session_id')) return $scopes->first(fn ($scope) => (int)$scope['session_id'] === $request->integer('session_id'));
+        if ($request->filled('competition_id')) return $scopes->first(fn ($scope) => (int)$scope['competition_id'] === $request->integer('competition_id'));
+        return $scopes->first();
+    }
+
+    private function selectedSession(Request $request, Competition $competition): ?CompetitionSession
+    {
+        if (! $competition->sessions()->exists()) return null;
+        abort_unless($request->filled('competition_session_id'), 422, 'Pilih kota pelaksanaan terlebih dahulu.');
+        return $this->accessibleSessions($request, $competition)->whereKey($request->integer('competition_session_id'))->firstOrFail();
+    }
+
+    private function authorizeDraw(Request $request, TournamentDraw $draw): void
+    {
+        $this->authorizeCompetition($request, $draw->competition);
+        if ($draw->competition_session_id) {
+            abort_unless($this->accessibleSessions($request, $draw->competition)->whereKey($draw->competition_session_id)->exists(), 403);
+        }
+    }
+
+    private function eligibleParticipants(Competition $competition, ?CompetitionSession $session = null)
     {
         return Registration::where('competition_id', $competition->id)
+            ->when($session, fn ($query) => $query->where('competition_session_id', $session->id))
             ->where('status', 'approved')
             ->when($competition->participation_type === 'team', fn ($query) => $query
                 ->whereNotNull('team_completed_at')
@@ -37,11 +90,12 @@ class TournamentController extends Controller
                 ->has('members', '=', $competition->team_size));
     }
 
-    private function forceMajeureCandidates(Competition $competition): Collection
+    private function forceMajeureCandidates(Competition $competition, ?CompetitionSession $session = null): Collection
     {
-        $eligibleIds = $this->eligibleParticipants($competition)->pluck('id');
+        $eligibleIds = $this->eligibleParticipants($competition, $session)->pluck('id');
 
         return Registration::where('competition_id', $competition->id)
+            ->when($session, fn ($query) => $query->where('competition_session_id', $session->id))
             ->where('status', '!=', 'rejected')
             ->whereNotIn('id', $eligibleIds)
             ->withCount('members')
@@ -68,35 +122,115 @@ class TournamentController extends Controller
 
     private function drawPayload(TournamentDraw $draw): TournamentDraw
     {
-        return $draw->load([
+        $draw->load([
             'operator:id,name','competition:id,title,slug',
+            'competitionSession:id,competition_id,venue_id,city,venue,competition_start_date,competition_end_date,schedule_venues',
+            'competitionSession.venueRecord:id,slug,city,name',
             'entries.registration:id,full_name,team_name,school_name,status',
             'matches.participantA:id,full_name,team_name,school_name,status',
             'matches.participantB:id,full_name,team_name,school_name,status',
             'matches.winner:id,full_name,team_name,school_name,status',
         ]);
+
+        $draw->setAttribute('group_standings', $this->groupStandings($draw));
+        return $draw;
+    }
+
+    private function groupStandings(TournamentDraw $draw): array
+    {
+        if (! in_array($draw->format, ['round_robin', 'round_robin_full', 'groups_knockout'], true)) return [];
+
+        $draw->loadMissing([
+            'entries.registration:id,full_name,team_name,school_name,status',
+            'matches.participantA:id,full_name,team_name,school_name,status',
+            'matches.participantB:id,full_name,team_name,school_name,status',
+        ]);
+        $matchesByGroup = $draw->matches->where('stage', 'group')->groupBy(fn ($match) => $match->group_name ?: $match->round_label);
+
+        return $draw->entries->whereNotNull('registration_id')->groupBy(fn ($entry) => $entry->group_name ?: 'Liga')
+            ->map(function ($entries, $groupName) use ($draw, $matchesByGroup) {
+                $rows = [];
+                foreach ($entries as $entry) {
+                    $participant = $entry->registration;
+                    $rows[$entry->registration_id] = [
+                        'registration_id' => $entry->registration_id,
+                        'participant' => $participant?->only(['id', 'full_name', 'team_name', 'school_name']),
+                        'played' => 0, 'won' => 0, 'drawn' => 0, 'lost' => 0,
+                        'goals_for' => 0, 'goals_against' => 0, 'goal_difference' => 0, 'points' => 0,
+                    ];
+                }
+
+                $groupMatches = $matchesByGroup->get($groupName, collect());
+                $completedMatches = $groupMatches->where('status', 'completed');
+                foreach ($completedMatches as $match) {
+                    $a = $match->participant_a_id;
+                    $b = $match->participant_b_id;
+                    if (! isset($rows[$a], $rows[$b])) continue;
+                    $scoreA = (float) $match->score_a;
+                    $scoreB = (float) $match->score_b;
+                    $rows[$a]['played']++; $rows[$b]['played']++;
+                    $rows[$a]['goals_for'] += $scoreA; $rows[$a]['goals_against'] += $scoreB;
+                    $rows[$b]['goals_for'] += $scoreB; $rows[$b]['goals_against'] += $scoreA;
+                    if ($scoreA === $scoreB) {
+                        $rows[$a]['drawn']++; $rows[$b]['drawn']++;
+                        $rows[$a]['points']++; $rows[$b]['points']++;
+                    } elseif ($scoreA > $scoreB) {
+                        $rows[$a]['won']++; $rows[$b]['lost']++; $rows[$a]['points'] += 3;
+                    } else {
+                        $rows[$b]['won']++; $rows[$a]['lost']++; $rows[$b]['points'] += 3;
+                    }
+                }
+
+                foreach ($rows as &$row) $row['goal_difference'] = $row['goals_for'] - $row['goals_against'];
+                unset($row);
+                $rows = array_values($rows);
+                usort($rows, fn ($a, $b) =>
+                    ($b['points'] <=> $a['points'])
+                    ?: ($b['goal_difference'] <=> $a['goal_difference'])
+                    ?: ($b['goals_for'] <=> $a['goals_for'])
+                    ?: ($b['won'] <=> $a['won'])
+                    ?: strcmp(mb_strtolower($a['participant']['team_name'] ?: $a['participant']['full_name']), mb_strtolower($b['participant']['team_name'] ?: $b['participant']['full_name']))
+                );
+                $completed = $groupMatches->isNotEmpty() && $completedMatches->count() === $groupMatches->count();
+                foreach ($rows as $index => &$row) {
+                    $row['position'] = $index + 1;
+                    $row['qualified'] = $draw->format === 'groups_knockout' && $completed && $index < 2;
+                }
+                unset($row);
+
+                return [
+                    'name' => $groupName,
+                    'played_matches' => $completedMatches->count(),
+                    'total_matches' => $groupMatches->count(),
+                    'completed' => $completed,
+                    'rows' => $rows,
+                ];
+            })->values()->all();
     }
 
     public function manage(Request $request)
     {
+        $scopes=$this->scopeOptions($request);
+        $scope=$this->selectedScope($request);
         $options=$this->competitions($request)->orderBy('title')->get(['id','title','slug']);
-        $competition=$request->filled('competition_id')
-            ? $this->competitions($request)->whereKey($request->integer('competition_id'))->firstOrFail()
-            : $this->competitions($request)->orderBy('title')->first();
-        if(!$competition)return ['competitions'=>$options,'competition'=>null,'participants'=>[],'draw'=>null,'history'=>[]];
-        $participants=$this->eligibleParticipants($competition)
+        if(!$scope)return ['scopes'=>$scopes,'competitions'=>$options,'competition'=>null,'session'=>null,'participants'=>[],'draw'=>null,'history'=>[],'can_unlock'=>$request->user()->role==='super_admin'];
+        $competition=$this->competitions($request)->whereKey($scope['competition_id'])->firstOrFail();
+        $session=$scope['session_id']?$this->accessibleSessions($request,$competition)->whereKey($scope['session_id'])->firstOrFail():null;
+        $participants=$this->eligibleParticipants($competition,$session)
             ->orderBy('full_name')->get(['id','ticket_code','full_name','team_name','school_name']);
-        $forceMajeureCandidates=$this->forceMajeureCandidates($competition);
-        $draw=$competition->tournamentDraws()->latest('version')->first();
-        return ['competitions'=>$options,'competition'=>$competition->only(['id','title','slug']),
+        $forceMajeureCandidates=$this->forceMajeureCandidates($competition,$session);
+        $draw=$competition->tournamentDraws()->where('competition_session_id',$session?->id)->latest('version')->first();
+        return ['scopes'=>$scopes,'competitions'=>$options,'competition'=>$competition->only(['id','title','slug']),
+            'session'=>$session?->only(['id','competition_id','venue_id','city','venue','competition_start_date','competition_end_date','schedule_venues']),
             'participants'=>$participants,'force_majeure_candidates'=>$forceMajeureCandidates,
             'drawing_readiness'=>[
                 'verified'=>$participants->count(),
                 'force_majeure_candidates'=>$forceMajeureCandidates->count(),
                 'rejected'=>Registration::where('competition_id',$competition->id)->where('status','rejected')->count(),
             ],
+            'can_unlock'=>$request->user()->role==='super_admin',
             'draw'=>$draw?$this->drawPayload($draw):null,
-            'history'=>$competition->tournamentDraws()->with('operator:id,name')->latest('version')->get(['id','competition_id','operator_id','version','mode','format','status','drawn_at','locked_at'])];
+            'history'=>$competition->tournamentDraws()->where('competition_session_id',$session?->id)->with('operator:id,name')->latest('version')->get(['id','competition_id','competition_session_id','operator_id','version','mode','format','status','drawn_at','locked_at'])];
     }
 
     public function start(Request $request, Competition $competition)
@@ -114,14 +248,16 @@ class TournamentController extends Controller
             'group_count'=>'nullable|integer|min:2|max:16','third_place'=>'boolean',
             'force_majeure_ids'=>'nullable|array|max:64','force_majeure_ids.*'=>'distinct|integer',
             'force_majeure_reason'=>'nullable|string|max:1000',
+            'competition_session_id'=>'nullable|integer|exists:competition_sessions,id',
         ]);
-        $latest=$competition->tournamentDraws()->latest('version')->first();
+        $session=$this->selectedSession($request,$competition);
+        $latest=$competition->tournamentDraws()->where('competition_session_id',$session?->id)->latest('version')->first();
         abort_if($latest?->status==='locked',422,'Drawing telah dikunci dan tidak dapat diulang.');
         $forceMajeureIds=collect($data['force_majeure_ids']??[])->map(fn($id)=>(int)$id)->unique()->values();
-        $forceMajeureCandidates=$this->forceMajeureCandidates($competition)->keyBy('id');
+        $forceMajeureCandidates=$this->forceMajeureCandidates($competition,$session)->keyBy('id');
         abort_if($forceMajeureIds->diff($forceMajeureCandidates->keys())->isNotEmpty(),422,'Pilihan force majeure tidak valid atau tim sudah ditolak.');
         abort_if($forceMajeureIds->isNotEmpty()&&mb_strlen(trim((string)($data['force_majeure_reason']??'')))<10,422,'Alasan force majeure wajib diisi minimal 10 karakter.');
-        $participants=$this->eligibleParticipants($competition)->get(['id','full_name','team_name','school_name'])
+        $participants=$this->eligibleParticipants($competition,$session)->get(['id','full_name','team_name','school_name'])
             ->concat($forceMajeureIds->map(fn($id)=>$forceMajeureCandidates[$id]))->unique('id')->values();
         abort_if($participants->count()<2,422,'Minimal dua peserta terverifikasi atau peserta force majeure diperlukan untuk drawing.');
         abort_if($participants->count()>64,422,'Maksimal 64 peserta dalam satu drawing.');
@@ -149,8 +285,8 @@ class TournamentController extends Controller
             }
         }
 
-        $draw=DB::transaction(function()use($request,$competition,$data,$participants,$latest,$forceMajeureIds,$forceMajeureCandidates){
-            $settings=collect($data)->except(['mode','format','force_majeure_ids','force_majeure_reason'])->all();
+        $draw=DB::transaction(function()use($request,$competition,$session,$data,$participants,$latest,$forceMajeureIds,$forceMajeureCandidates){
+            $settings=collect($data)->except(['mode','format','force_majeure_ids','force_majeure_reason','competition_session_id'])->all();
             if($forceMajeureIds->isNotEmpty())$settings['force_majeure']=[
                 'registration_ids'=>$forceMajeureIds->all(),
                 'reason'=>trim($data['force_majeure_reason']),
@@ -164,7 +300,7 @@ class TournamentController extends Controller
                     'issues'=>$candidate->force_majeure_issues,
                 ];})->all(),
             ];
-            $draw=$competition->tournamentDraws()->create(['operator_id'=>$request->user()->id,'version'=>($latest?->version??0)+1,'mode'=>$data['mode'],'format'=>$data['format'],'settings'=>$settings,'drawn_at'=>now()]);
+            $draw=$competition->tournamentDraws()->create(['competition_session_id'=>$session?->id,'operator_id'=>$request->user()->id,'version'=>($latest?->version??0)+1,'mode'=>$data['mode'],'format'=>$data['format'],'settings'=>$settings,'drawn_at'=>now()]);
             $ordered=$this->orderParticipants($participants,$data);
             if(in_array($data['format'],['round_robin','round_robin_full','groups_knockout'],true))$this->createGroupDraw($draw,$ordered,$data);
             else $this->createBracketDraw($draw,$ordered,$data);
@@ -278,7 +414,7 @@ class TournamentController extends Controller
 
     public function updateMatch(Request $request,TournamentMatch $match)
     {
-        $this->authorizeCompetition($request,$match->tournamentDraw->competition);
+        $this->authorizeDraw($request,$match->tournamentDraw);
         $data=$request->validate(['score_a'=>'nullable|numeric|min:0','score_b'=>'nullable|numeric|min:0','scheduled_at'=>'nullable|date','venue'=>'nullable|string|max:160','duration_minutes'=>'nullable|integer|min:5|max:720','status'=>'required|in:unscheduled,upcoming,check_in,ongoing,delayed,completed,walkover,cancelled,bye']);
         if(!empty($data['scheduled_at']))$data['scheduled_at']=Carbon::parse($data['scheduled_at'],'Asia/Jakarta')->utc();
         if($data['status']==='completed'){
@@ -293,11 +429,11 @@ class TournamentController extends Controller
         if ($match->status === 'completed' && $match->winner_id && preg_match('/\bfinal\b/i', $match->round_label)) {
             $loserId = $match->winner_id === $match->participant_a_id ? $match->participant_b_id : $match->participant_a_id;
             CompetitionResult::updateOrCreate(
-                ['competition_id'=>$match->tournamentDraw->competition_id, 'competition_session_id'=>null, 'rank'=>1, 'source'=>'tournament'],
+                ['competition_id'=>$match->tournamentDraw->competition_id, 'competition_session_id'=>$match->tournamentDraw->competition_session_id, 'rank'=>1, 'source'=>'tournament'],
                 ['registration_id'=>$match->winner_id, 'title'=>'Juara 1', 'announced_at'=>now()]
             );
             if ($loserId) CompetitionResult::updateOrCreate(
-                ['competition_id'=>$match->tournamentDraw->competition_id, 'competition_session_id'=>null, 'rank'=>2, 'source'=>'tournament'],
+                ['competition_id'=>$match->tournamentDraw->competition_id, 'competition_session_id'=>$match->tournamentDraw->competition_session_id, 'rank'=>2, 'source'=>'tournament'],
                 ['registration_id'=>$loserId, 'title'=>'Juara 2', 'announced_at'=>now()]
             );
         }
@@ -319,30 +455,50 @@ class TournamentController extends Controller
 
     public function lock(Request $request,TournamentDraw $draw)
     {
-        $this->authorizeCompetition($request,$draw->competition);$draw->update(['status'=>'locked','locked_at'=>now()]);return $this->drawPayload($draw->fresh());
+        $this->authorizeDraw($request,$draw);$draw->update(['status'=>'locked','locked_at'=>now()]);return $this->drawPayload($draw->fresh());
+    }
+
+    public function unlock(Request $request,TournamentDraw $draw)
+    {
+        abort_unless($request->user()->role === 'super_admin', 403, 'Hanya Super Admin yang dapat membuka kunci drawing.');
+        $this->authorizeDraw($request, $draw);
+        abort_unless($draw->status === 'locked', 422, 'Drawing belum dikunci.');
+
+        $settings = $draw->settings ?? [];
+        $settings['unlock_history'] = collect($settings['unlock_history'] ?? [])->push([
+            'user_id' => $request->user()->id,
+            'user_name' => $request->user()->name,
+            'unlocked_at' => now()->toIso8601String(),
+        ])->values()->all();
+        $draw->update(['status'=>'draft', 'locked_at'=>null, 'settings'=>$settings]);
+
+        return $this->drawPayload($draw->fresh());
     }
 
     public function generateKnockout(Request $request,TournamentDraw $draw)
     {
-        $this->authorizeCompetition($request,$draw->competition);
+        $this->authorizeDraw($request,$draw);
         abort_unless($draw->format==='groups_knockout',422,'Format drawing ini bukan grup dilanjutkan knockout.');
         abort_if($draw->matches()->where('stage','knockout')->exists(),422,'Babak knockout sudah dibuat.');
         $groupMatches=$draw->matches()->where('stage','group')->get();
         abort_if($groupMatches->isEmpty()||$groupMatches->contains(fn($m)=>$m->status!=='completed'),422,'Selesaikan seluruh pertandingan grup terlebih dahulu.');
-        $qualifiers=[];
-        foreach($groupMatches->groupBy('group_name') as $matches){
-            $table=[];
-            foreach($matches as $match){foreach([$match->participant_a_id,$match->participant_b_id] as $id)$table[$id]??=['id'=>$id,'points'=>0,'difference'=>0];$a=$table[$match->participant_a_id];$b=$table[$match->participant_b_id];$table[$match->participant_a_id]['difference']+=(float)$match->score_a-(float)$match->score_b;$table[$match->participant_b_id]['difference']+=(float)$match->score_b-(float)$match->score_a;if((float)$match->score_a===(float)$match->score_b){$table[$match->participant_a_id]['points']++;$table[$match->participant_b_id]['points']++;}elseif((float)$match->score_a>(float)$match->score_b)$table[$match->participant_a_id]['points']+=3;else $table[$match->participant_b_id]['points']+=3;}
-            $ranked=collect($table)->sortByDesc(fn($row)=>sprintf('%05d:%08.2f',$row['points'],$row['difference']))->values();$qualifiers[]=$ranked[0]['id'];$qualifiers[]=$ranked[1]['id'];
-        }
+        $qualifiers=collect($this->groupStandings($draw))->flatMap(fn($group)=>collect($group['rows'])->take(2)->pluck('registration_id'))->all();
         $participants=Registration::whereIn('id',$qualifiers)->get()->keyBy('id');$ordered=collect($qualifiers)->map(fn($id)=>$participants[$id]);$size=2;while($size<$ordered->count())$size*=2;$slots=array_pad($ordered->all(),$size,null);
         $this->createEliminationMatches($draw,$slots,['third_place'=>$draw->settings['third_place']??false],false,'knockout',(int)$draw->matches()->max('match_number')+1);
         return $this->drawPayload($draw->fresh());
     }
 
-    public function publicView(string $slug)
+    public function publicView(Request $request, string $slug)
     {
-        $competition=Competition::where('event_edition_id', EventEdition::resolveCurrent(true)->id)->where('slug',$slug)->firstOrFail();$draw=$competition->tournamentDraws()->where('status','locked')->latest('version')->first();
-        return ['competition'=>$competition->only(['id','title','slug']),'draw'=>$draw?$this->drawPayload($draw):null];
+        $competition=Competition::where('event_edition_id', EventEdition::resolveCurrent(true)->id)->where('slug',$slug)->firstOrFail();
+        $sessions=$competition->sessions()->where('is_active',true)->with('venueRecord:id,slug,city,name')->get();
+        $session=$request->filled('session_id')?$sessions->firstWhere('id',$request->integer('session_id'))
+            :($request->filled('city')?$sessions->first(fn($item)=>$item->venueRecord?->slug===$request->string('city')->toString()):$sessions->first());
+        if($sessions->isNotEmpty())abort_unless($session,404);
+        $draw=$competition->tournamentDraws()->where('competition_session_id',$session?->id)->where('status','locked')->latest('version')->first();
+        return ['competition'=>$competition->only(['id','title','slug']),
+            'sessions'=>$sessions->map(fn($item)=>[...$item->only(['id','city','venue','competition_start_date','competition_end_date']),'venue_slug'=>$item->venueRecord?->slug])->values(),
+            'session'=>$session?->only(['id','city','venue','competition_start_date','competition_end_date']),
+            'draw'=>$draw?$this->drawPayload($draw):null];
     }
 }

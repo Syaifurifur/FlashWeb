@@ -14,5 +14,6 @@ class TournamentScheduleBlock extends Model
     }
 
     public function competition() { return $this->belongsTo(Competition::class); }
+    public function competitionSession() { return $this->belongsTo(CompetitionSession::class); }
     public function tournamentDraw() { return $this->belongsTo(TournamentDraw::class); }
 }

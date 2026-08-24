@@ -1,0 +1,26 @@
+16.54.59 [vite] (client) [Unhandled rejection] ApplicationError: Sesi tidak valid atau telah berakhir.
+ > createApiError src/error-utils.js:36:16
+    34 |      ? 'Tidak dapat terhubung ke server. Periksa koneksi dan pastikan layanan aplikasi berjalan.'
+    35 |      : payload.message || 'Permintaan gagal diproses. Silakan coba kembali.'
+    36 |    const error = new Error(message, cause ? {cause} : undefined)
+       |                  ^
+    37 |    error.name = 'ApplicationError'
+    38 |    error.status = status
+ > api src/api.js:50:18
+
+18.18.51 [vite] (client) [console.error] ApplicationError: Cannot read properties of undefined (reading 'map')
+    at ScheduleManager (http://127.0.0.1:5173/src/Schedule.jsx:1086:33)
+    at Object.react_stack_bottom_frame (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=9c35f229:12866:12)
+    at renderWithHooks (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=9c35f229:4213:19)
+    at updateFunctionComponent (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=9c35f229:5569:16)
+    at beginWork (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=9c35f229:6140:20)
+    at runWithFiberInDEV (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=9c35f229:851:66)
+    at performUnitOfWork (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=9c35f229:8429:92)
+    at workLoopSync (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=9c35f229:8325:37)
+    at renderRootSync (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=9c35f229:8309:6)
+    at performWorkOnRoot (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=9c35f229:7994:27)
+
+The above error occurred in the <ScheduleManager> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ApplicationErrorBoundary.
+

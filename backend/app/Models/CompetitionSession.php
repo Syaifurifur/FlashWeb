@@ -20,6 +20,7 @@ class CompetitionSession extends Model
             'submission_start_at' => 'datetime',
             'submission_end_at' => 'datetime',
             'timeline' => 'array',
+            'schedule_venues' => 'array',
             'fee' => 'decimal:2',
             'quota' => 'integer',
             'pic_slots' => 'integer',
@@ -37,4 +38,6 @@ class CompetitionSession extends Model
     public function pics() { return $this->staff()->wherePivot('role', 'pic')->orderByPivot('sort_order'); }
     public function supervisors() { return $this->staff()->wherePivot('role', 'spv')->orderByPivot('sort_order'); }
     public function registrations() { return $this->hasMany(Registration::class); }
+    public function tournamentDraws() { return $this->hasMany(TournamentDraw::class); }
+    public function scheduleBlocks() { return $this->hasMany(TournamentScheduleBlock::class); }
 }

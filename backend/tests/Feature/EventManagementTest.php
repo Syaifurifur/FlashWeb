@@ -109,6 +109,115 @@ class EventManagementTest extends TestCase
             ->assertOk()->assertJsonPath('mother_name', 'Rahasia');
     }
 
+    public function test_dashboard_shows_filled_quota_for_each_competition_city(): void
+    {
+        $competition = $this->competition();
+        $competition->update(['quota' => 4]);
+        $jakartaVenue = CompetitionVenue::create([
+            'slug' => 'jakarta-kuota',
+            'name' => 'Kampus BSI Jakarta',
+            'city' => 'Jakarta',
+            'address' => 'Jakarta',
+            'activity_start_date' => '2027-01-10',
+            'activity_end_date' => '2027-01-12',
+            'is_active' => true,
+        ]);
+        $bandungVenue = CompetitionVenue::create([
+            'slug' => 'bandung-kuota',
+            'name' => 'Kampus BSI Bandung',
+            'city' => 'Bandung',
+            'address' => 'Bandung',
+            'activity_start_date' => '2027-01-15',
+            'activity_end_date' => '2027-01-16',
+            'is_active' => true,
+        ]);
+        $session = CompetitionSession::create([
+            'competition_id' => $competition->id,
+            'venue_id' => $jakartaVenue->id,
+            'city' => 'Jakarta',
+            'venue' => 'Kampus BSI Jakarta',
+            'activity_start_date' => '2027-01-10',
+            'activity_end_date' => '2027-01-12',
+            'competition_start_date' => '2027-01-11',
+            'competition_end_date' => '2027-01-12',
+            'quota' => 4,
+        ]);
+        $bandungSession = CompetitionSession::create([
+            'competition_id' => $competition->id,
+            'venue_id' => $bandungVenue->id,
+            'city' => 'Bandung',
+            'venue' => 'Kampus BSI Bandung',
+            'activity_start_date' => '2027-01-15',
+            'activity_end_date' => '2027-01-16',
+            'competition_start_date' => '2027-01-15',
+            'competition_end_date' => '2027-01-16',
+            'quota' => 10,
+        ]);
+        User::create([
+            'name' => 'Admin Kuota',
+            'email' => 'admin-kuota@test.id',
+            'password' => 'password123',
+            'role' => 'super_admin',
+            'api_token' => hash('sha256', 'admin-kuota-token'),
+        ]);
+
+        foreach (range(1, 3) as $number) {
+            Registration::create([
+                'competition_id' => $competition->id,
+                'competition_session_id' => $session->id,
+                'ticket_code' => 'BSIFLASH-KUOTA'.$number,
+                'full_name' => 'Peserta Kuota '.$number,
+                'whatsapp' => '08123456789'.$number,
+                'email' => 'peserta-kuota-'.$number.'@test.id',
+                'birth_place' => 'Jakarta',
+                'birth_date' => '2009-01-01',
+                'grade' => 'XI',
+                'nisn' => '123456789'.$number,
+                'mother_name' => 'Ibu Peserta',
+                'school_name' => 'SMA Test',
+                'teacher_name' => 'Guru Test',
+                'teacher_contact' => '081298765432',
+                'student_card_path' => 'kartu.pdf',
+                'delegation_letter_path' => 'delegasi.pdf',
+                'photo_path' => 'foto.png',
+                'consent' => true,
+            ]);
+        }
+        Registration::create([
+            'competition_id' => $competition->id,
+            'competition_session_id' => $bandungSession->id,
+            'ticket_code' => 'BSIFLASH-BANDUNG1',
+            'full_name' => 'Peserta Bandung',
+            'whatsapp' => '081234567899',
+            'email' => 'peserta-bandung@test.id',
+            'birth_place' => 'Bandung',
+            'birth_date' => '2009-01-01',
+            'grade' => 'XI',
+            'nisn' => '9876543210',
+            'mother_name' => 'Ibu Peserta',
+            'school_name' => 'SMA Bandung',
+            'teacher_name' => 'Guru Bandung',
+            'teacher_contact' => '081298765433',
+            'student_card_path' => 'kartu.pdf',
+            'delegation_letter_path' => 'delegasi.pdf',
+            'photo_path' => 'foto.png',
+            'consent' => true,
+        ]);
+
+        $this->withToken('admin-kuota-token')->getJson('/api/manage/dashboard')
+            ->assertOk()
+            ->assertJsonCount(2, 'cities')
+            ->assertJsonPath('cities.0.city', 'Jakarta')
+            ->assertJsonPath('cities.0.competition_quotas.0.title', 'Olimpiade Test')
+            ->assertJsonPath('cities.0.competition_quotas.0.filled', 3)
+            ->assertJsonPath('cities.0.competition_quotas.0.quota', 4)
+            ->assertJsonPath('cities.1.city', 'Bandung')
+            ->assertJsonPath('cities.1.competition_quotas.0.title', 'Olimpiade Test')
+            ->assertJsonPath('cities.1.competition_quotas.0.filled', 1)
+            ->assertJsonPath('cities.1.competition_quotas.0.quota', 10)
+            ->assertJsonMissingPath('competition_quotas');
+    }
+
     public function test_initial_registration_requires_school_name(): void
     {
         $competition = $this->competition();
@@ -280,6 +389,7 @@ class EventManagementTest extends TestCase
     {
         $competition=$this->competition();
         User::create(['name'=>'PIC Drawing','email'=>'pic-drawing@test.id','password'=>'password123','role'=>'pic','competition_id'=>$competition->id,'api_token'=>hash('sha256','pic-drawing-token')]);
+        $admin=User::create(['name'=>'Admin Buka Drawing','email'=>'admin-buka-drawing@test.id','password'=>'password123','role'=>'super_admin','api_token'=>hash('sha256','admin-buka-drawing-token')]);
         $registrations=collect();
         foreach(range(1,14) as $number)$registrations->push(Registration::create([
             'competition_id'=>$competition->id,'ticket_code'=>'DRAW-'.str_pad($number,3,'0',STR_PAD_LEFT),'full_name'=>'Peserta '.$number,
@@ -313,6 +423,21 @@ class EventManagementTest extends TestCase
         $this->withToken('pic-drawing-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
             'mode'=>'random','format'=>'single_elimination',
         ])->assertUnprocessable();
+        $this->withToken('pic-drawing-token')->postJson('/api/manage/tournaments/draws/'.$manualId.'/unlock')
+            ->assertForbidden();
+        $this->withToken('pic-drawing-token')->getJson('/api/manage/tournaments?competition_id='.$competition->id)
+            ->assertOk()->assertJsonPath('can_unlock',false);
+        $this->withToken('admin-buka-drawing-token')->getJson('/api/manage/tournaments?competition_id='.$competition->id)
+            ->assertOk()->assertJsonPath('can_unlock',true);
+        $this->withToken('admin-buka-drawing-token')->postJson('/api/manage/tournaments/draws/'.$manualId.'/unlock')
+            ->assertOk()
+            ->assertJsonPath('status','draft')
+            ->assertJsonPath('locked_at',null)
+            ->assertJsonPath('settings.unlock_history.0.user_id',$admin->id);
+        $this->getJson('/api/competitions/'.$competition->slug.'/tournament')->assertOk()->assertJsonPath('draw',null);
+        $this->withToken('pic-drawing-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
+            'mode'=>'random','format'=>'single_elimination',
+        ])->assertCreated()->assertJsonPath('version',3);
     }
 
     public function test_double_elimination_and_group_knockout_generation(): void
@@ -331,7 +456,10 @@ class EventManagementTest extends TestCase
         $this->assertCount(14,$double->json('matches'));
         $groups=$this->withToken('admin-tournament-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
             'mode'=>'random','format'=>'groups_knockout','group_count'=>2,'third_place'=>true,
-        ])->assertCreated();
+        ])->assertCreated()->assertJsonCount(2,'group_standings')
+            ->assertJsonPath('group_standings.0.played_matches',0)
+            ->assertJsonPath('group_standings.0.completed',false)
+            ->assertJsonCount(4,'group_standings.0.rows');
         $groupDrawId=$groups->json('id');
         $groupMatches=TournamentMatch::where('tournament_draw_id',$groupDrawId)->where('stage','group')->get();
         $this->assertCount(12,$groupMatches);
@@ -339,10 +467,17 @@ class EventManagementTest extends TestCase
         $firstGroupMatch=$groupMatches->shift();
         $this->withToken('admin-tournament-token')->putJson('/api/manage/tournaments/matches/'.$firstGroupMatch->id,[
             'score_a'=>2,'score_b'=>1,'status'=>'completed','venue'=>'Lapangan Grup',
-        ])->assertOk();
+        ])->assertOk()->assertJsonPath('group_standings.0.played_matches',1)
+            ->assertJsonPath('group_standings.0.rows.0.points',3);
         foreach($groupMatches as $match)$match->update(['score_a'=>2,'score_b'=>1,'winner_id'=>$match->participant_a_id,'status'=>'completed']);
-        $this->withToken('admin-tournament-token')->postJson('/api/manage/tournaments/draws/'.$groupDrawId.'/knockout')
+        $knockout=$this->withToken('admin-tournament-token')->postJson('/api/manage/tournaments/draws/'.$groupDrawId.'/knockout')
             ->assertOk()->assertJsonFragment(['stage'=>'knockout']);
+        foreach($knockout->json('group_standings') as $standing){
+            $this->assertTrue($standing['completed']);
+            $this->assertCount(2,collect($standing['rows'])->where('qualified',true));
+        }
+        $this->getJson('/api/competitions/'.$competition->slug.'/tournament')
+            ->assertOk()->assertJsonCount(2,'draw.group_standings');
     }
 
     public function test_team_drawing_only_uses_complete_and_reviewed_teams(): void
@@ -493,7 +628,16 @@ class EventManagementTest extends TestCase
             'title'=>'Istirahat','venue'=>'Lapangan 2','starts_at'=>'2030-01-15 12:00:00','duration_minutes'=>60,
         ])->assertCreated()->assertJsonCount(1,'blocks');
         $this->assertDatabaseHas('tournament_schedule_blocks',['competition_id'=>$competition->id,'starts_at'=>'2030-01-15 05:00:00']);
-        $matches[0]->update(['status'=>'completed','score_a'=>3,'score_b'=>1,'winner_id'=>$matches[0]->participant_a_id]);
+        $this->withToken('pic-jadwal-token')->putJson('/api/manage/schedules/matches/'.$matches[0]->id,[
+            'scheduled_at'=>$startsAt,'venue'=>'Lapangan Utama','duration_minutes'=>60,'status'=>'ongoing','force'=>true,
+        ])->assertOk()->assertJsonFragment(['id'=>$matches[0]->id,'status'=>'ongoing']);
+        $this->withToken('pic-jadwal-token')->putJson('/api/manage/schedules/matches/'.$matches[0]->id,[
+            'scheduled_at'=>$startsAt,'venue'=>'Lapangan Utama','duration_minutes'=>60,'status'=>'completed',
+            'score_a'=>3,'score_b'=>1,'force'=>true,
+        ])->assertOk()->assertJsonFragment(['id'=>$matches[0]->id,'status'=>'completed']);
+        $this->assertDatabaseHas('tournament_matches',[
+            'id'=>$matches[0]->id,'status'=>'completed','score_a'=>3,'score_b'=>1,'winner_id'=>$matches[0]->participant_a_id,
+        ]);
         $tvFeed=$this->getJson('/api/competitions/'.$competition->slug.'/schedule')->assertOk()
             ->assertJsonPath('draw.id',$draw->json('id'))->assertJsonPath('timezone','Asia/Jakarta')
             ->assertJsonPath('timezone_label','WIB')->assertJsonPath('utc_offset','+07:00')->assertJsonCount(1,'blocks');
@@ -571,6 +715,66 @@ class EventManagementTest extends TestCase
         ])->assertUnprocessable()->assertJsonPath('message','Kapasitas jadwal tidak cukup. Tambah jumlah hari/lapangan, perpanjang jam operasional, atau kurangi durasi dan jeda pertandingan.');
         $afterFailure=TournamentMatch::where('tournament_draw_id',$draw->json('id'))->pluck('scheduled_at','id')->map(fn($value)=>(string)$value)->all();
         $this->assertSame($beforeFailure,$afterFailure);
+    }
+
+    public function test_drawing_bracket_and_schedule_are_isolated_for_each_city_session(): void
+    {
+        $competition=$this->competition();
+        $admin=User::create(['name'=>'Admin Multi Kota','email'=>'admin-multi-kota@test.id','password'=>'password123','role'=>'super_admin','api_token'=>hash('sha256','admin-multi-kota-token')]);
+        $bogor=$competition->sessions()->create([
+            'city'=>'Bogor','venue'=>'Kampus BSI Bogor','activity_start_date'=>'2030-03-01','activity_end_date'=>'2030-03-03',
+            'competition_start_date'=>'2030-03-01','competition_end_date'=>'2030-03-03','quota'=>16,'sort_order'=>1,'is_active'=>true,
+        ]);
+        $jakarta=$competition->sessions()->create([
+            'city'=>'Jakarta','venue'=>'Kampus BSI Jakarta','activity_start_date'=>'2030-04-01','activity_end_date'=>'2030-04-03',
+            'competition_start_date'=>'2030-04-01','competition_end_date'=>'2030-04-03','quota'=>16,'sort_order'=>2,'is_active'=>true,
+        ]);
+        foreach([[$bogor,'BOGOR'],[$jakarta,'JAKARTA']] as [$session,$prefix])foreach(range(1,4) as $number)Registration::create([
+            'competition_id'=>$competition->id,'competition_session_id'=>$session->id,'ticket_code'=>$prefix.'-'.$number,
+            'full_name'=>'Tim '.$prefix.' '.$number,'whatsapp'=>'08126666'.str_pad($session->id.$number,4,'0',STR_PAD_LEFT),
+            'email'=>strtolower($prefix).$number.'@multi-kota.test','birth_place'=>'Bogor','birth_date'=>'2009-01-01','grade'=>'XI',
+            'nisn'=>(string)(7200000000+$session->id*10+$number),'mother_name'=>'Ibu','school_name'=>'Sekolah '.$prefix,
+            'teacher_name'=>'Guru','teacher_contact'=>'081298765432','student_card_path'=>'a.pdf','delegation_letter_path'=>'b.pdf','photo_path'=>'c.jpg','consent'=>true,'status'=>'approved',
+        ]);
+
+        $manage=$this->withToken('admin-multi-kota-token')->getJson('/api/manage/tournaments')->assertOk()->assertJsonCount(2,'scopes');
+        $this->assertSame($bogor->id,$manage->json('session.id'));
+        $bogorDraw=$this->withToken('admin-multi-kota-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
+            'competition_session_id'=>$bogor->id,'mode'=>'random','format'=>'single_elimination',
+        ])->assertCreated()->assertJsonPath('competition_session_id',$bogor->id)->assertJsonPath('version',1);
+        $this->withToken('admin-multi-kota-token')->postJson('/api/manage/tournaments/draws/'.$bogorDraw->json('id').'/lock')->assertOk();
+        $jakartaDraw=$this->withToken('admin-multi-kota-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
+            'competition_session_id'=>$jakarta->id,'mode'=>'random','format'=>'single_elimination',
+        ])->assertCreated()->assertJsonPath('competition_session_id',$jakarta->id)->assertJsonPath('version',1);
+        $this->withToken('admin-multi-kota-token')->postJson('/api/manage/tournaments/draws/'.$jakartaDraw->json('id').'/lock')->assertOk();
+
+        $bogorEntryIds=collect($bogorDraw->json('entries'))->pluck('registration_id')->filter();
+        $jakartaEntryIds=collect($jakartaDraw->json('entries'))->pluck('registration_id')->filter();
+        $this->assertEmpty($bogorEntryIds->intersect($jakartaEntryIds));
+        $this->assertTrue($bogorEntryIds->every(fn($id)=>Registration::find($id)->competition_session_id===$bogor->id));
+        $this->assertTrue($jakartaEntryIds->every(fn($id)=>Registration::find($id)->competition_session_id===$jakarta->id));
+        $this->withToken('admin-multi-kota-token')->getJson('/api/manage/tournaments?competition_id='.$competition->id.'&session_id='.$jakarta->id)
+            ->assertOk()->assertJsonPath('draw.id',$jakartaDraw->json('id'))->assertJsonPath('session.city','Jakarta');
+
+        foreach([[$bogor,$bogorDraw,'Lapangan Bogor','2030-03-01'],[$jakarta,$jakartaDraw,'Lapangan Jakarta','2030-04-01']] as [$session,$draw,$field,$date]){
+            $this->withToken('admin-multi-kota-token')->putJson('/api/manage/schedules/competitions/'.$competition->id.'/venues',[
+                'competition_session_id'=>$session->id,'venues'=>[$field],
+            ])->assertOk()->assertJsonPath('session.id',$session->id);
+            $this->withToken('admin-multi-kota-token')->postJson('/api/manage/schedules/competitions/'.$competition->id.'/generate',[
+                'competition_session_id'=>$session->id,'start_date'=>$date,'start_time'=>'08:00','end_time'=>'12:00',
+                'duration_minutes'=>60,'gap_minutes'=>0,'max_days'=>1,'venues'=>[$field],'notify'=>true,
+            ])->assertOk()->assertJsonPath('automation.scheduled_count',2)->assertJsonPath('session.id',$session->id);
+            $this->assertDatabaseHas('competition_notifications',['competition_id'=>$competition->id,'competition_session_id'=>$session->id,'title'=>'Jadwal Pertandingan Telah Dibuat']);
+        }
+
+        $this->getJson('/api/competitions/'.$competition->slug.'/tournament?session_id='.$bogor->id)
+            ->assertOk()->assertJsonPath('session.city','Bogor')->assertJsonPath('draw.id',$bogorDraw->json('id'));
+        $bogorSchedule=$this->getJson('/api/competitions/'.$competition->slug.'/schedule?session_id='.$bogor->id)
+            ->assertOk()->assertJsonPath('session.city','Bogor');
+        $jakartaSchedule=$this->getJson('/api/competitions/'.$competition->slug.'/schedule?session_id='.$jakarta->id)
+            ->assertOk()->assertJsonPath('session.city','Jakarta');
+        $this->assertTrue(collect($bogorSchedule->json('matches'))->whereNotNull('scheduled_at')->every(fn($match)=>$match['venue']==='Lapangan Bogor'));
+        $this->assertTrue(collect($jakartaSchedule->json('matches'))->whereNotNull('scheduled_at')->every(fn($match)=>$match['venue']==='Lapangan Jakarta'));
     }
 
     public function test_super_admin_creates_role_with_checked_permissions(): void

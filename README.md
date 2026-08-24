@@ -56,6 +56,16 @@ Setiap perubahan fitur, skema database, API, hak akses, atau alur pengguna wajib
 
 ## Changelog
 
+### 2026-08-24
+
+- Memisahkan drawing, bagan, klasemen, hasil, jadwal, lapangan, blok waktu, notifikasi pertandingan, TV Mode, dan tampilan publik berdasarkan sesi kota; panel panitia serta halaman peserta kini menyediakan pemilih lomba dan kota agar data antarlokasi tidak bercampur.
+- Menampilkan klasemen setiap grup pada halaman Drawing & Bagan panitia dan halaman bagan publik, lengkap dengan statistik pertandingan, gol, selisih gol, poin, serta penanda dua tim yang lolos ke babak knockout.
+- Menambahkan tombol `Mulai`, `Selesaikan`, dan `Edit Hasil` pada setiap kartu jadwal pertandingan agar panitia dapat memproses status pertandingan serta skor akhir secara langsung.
+- Memperbaiki tampilan jadwal setelah proses otomatis agar data daftar lomba tetap tersedia dan halaman tidak mengalami galat render.
+- Membatasi pembukaan kunci hasil drawing hanya untuk Super Admin melalui validasi API dan tombol khusus, sekaligus mencatat pengguna serta waktu pembukaan dalam audit drawing.
+- Menambahkan seeder `FutsalDemoSeeder` berisi 16 tim FUTSAL PUTRA terverifikasi lengkap dengan 12 pemain dan 3 official per tim pada sesi Bogor untuk pengujian drawing, jadwal pertandingan, dan TV Mode.
+- Menambahkan jumlah kuota terisi setiap cabang lomba langsung pada kartu ringkasan kota dalam format ringkas `terisi/kuota`, sesuai cakupan akses pengguna.
+
 ### 2026-08-22
 
 - Menampilkan seluruh dokumen yang diunggah admin pada halaman Download Dokumen publik, mencakup dokumen umum dan dokumen khusus setiap cabang lomba dalam kelompok yang mudah ditemukan peserta.

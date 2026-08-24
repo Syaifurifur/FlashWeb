@@ -75,6 +75,14 @@ function MatchEditor({match, reload, locked}) {
   </article>
 }
 
+function GroupStandings({groups}) {
+  if (!groups?.length) return null
+  return <section className="mt-6 rounded-3xl bg-white p-4 sm:p-7">
+    <div className="flex flex-wrap items-end justify-between gap-3"><div><div className="text-xs font-black uppercase tracking-[.16em] text-emerald-700">Hasil Group Stage</div><h2 className="mt-1 font-display text-2xl font-bold">Klasemen Grup</h2></div><p className="text-xs text-slate-500">Urutan: poin, selisih gol, gol memasukkan, lalu jumlah kemenangan.</p></div>
+    <div className="mt-5 grid gap-5 xl:grid-cols-2">{groups.map(group => <article key={group.name} className="overflow-hidden rounded-2xl border"><div className="flex items-center justify-between bg-slate-50 px-4 py-3"><b className="font-display">{group.name}</b><span className={`rounded-full px-2 py-1 text-[10px] font-black ${group.completed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{group.completed ? 'Final' : `${group.played_matches}/${group.total_matches} laga`}</span></div><div className="overflow-x-auto"><table className="w-full min-w-[620px] text-xs"><thead className="bg-ink text-[#fff]"><tr><th className="px-3 py-2 text-center">#</th><th className="px-3 py-2 text-left">Tim</th><th title="Main" className="px-2 py-2">MP</th><th title="Menang" className="px-2 py-2">M</th><th title="Seri" className="px-2 py-2">S</th><th title="Kalah" className="px-2 py-2">K</th><th title="Gol memasukkan" className="px-2 py-2">GM</th><th title="Gol kemasukan" className="px-2 py-2">GK</th><th title="Selisih gol" className="px-2 py-2">SG</th><th className="px-3 py-2">Poin</th></tr></thead><tbody>{group.rows.map(row => <tr key={row.registration_id} className={`border-t ${row.qualified ? 'bg-emerald-50' : ''}`}><td className="px-3 py-3 text-center font-black">{row.position}</td><td className="px-3 py-3"><b>{nameOf(row.participant)}</b>{row.qualified && <span className="ml-2 rounded-full bg-emerald-600 px-2 py-1 text-[9px] font-black text-white">LOLOS</span>}<span className="mt-1 block text-[10px] text-slate-400">{row.participant?.school_name}</span></td><td className="px-2 py-3 text-center">{row.played}</td><td className="px-2 py-3 text-center">{row.won}</td><td className="px-2 py-3 text-center">{row.drawn}</td><td className="px-2 py-3 text-center">{row.lost}</td><td className="px-2 py-3 text-center">{row.goals_for}</td><td className="px-2 py-3 text-center">{row.goals_against}</td><td className="px-2 py-3 text-center">{row.goal_difference}</td><td className="px-3 py-3 text-center font-black">{row.points}</td></tr>)}</tbody></table></div></article>)}</div>
+  </section>
+}
+
 export function TournamentManager() {
   const [data, setData] = useState(null)
   const [mode, setMode] = useState('random')
@@ -103,9 +111,12 @@ export function TournamentManager() {
       setForceMajeureReason('')
     }
   }
-  const load = async (id, reset = false) => {
+  const load = async (id, reset = false, sessionId = null) => {
     try {
-      hydrate(await api(`/manage/tournaments${id ? `?competition_id=${id}` : ''}`), reset)
+      const query = new URLSearchParams()
+      if (id) query.set('competition_id', id)
+      if (sessionId) query.set('session_id', sessionId)
+      hydrate(await api(`/manage/tournaments${query.size ? `?${query}` : ''}`), reset)
     } catch {
       // Kesalahan API sudah ditampilkan oleh pusat pesan aplikasi.
     }
@@ -168,6 +179,13 @@ export function TournamentManager() {
   if (!data) return <div className="p-10 text-center font-bold">Memuat drawing...</div>
   if (!data.competition) return <div className="rounded-3xl bg-white p-10 text-center">Belum ada lomba yang dapat dikelola.</div>
 
+  const reload = () => load(data.competition.id, false, data.session?.id)
+  const scopeValue = `${data.competition.id}:${data.session?.id || 0}`
+  const selectScope = value => {
+    const [competitionId, sessionId] = value.split(':').map(Number)
+    load(competitionId, true, sessionId || null)
+  }
+
   const toggle = (setter, values, id) => setter(values.includes(id) ? values.filter(value => value !== id) : [...values, id])
   const toggleForceMajeure = id => {
     const selected = forceMajeureIds.includes(id)
@@ -225,12 +243,13 @@ export function TournamentManager() {
         host_ids: mode === 'manual' ? [] : hosts,
         force_majeure_ids: forceMajeureIds,
         force_majeure_reason: forceMajeureIds.length ? forceMajeureReason.trim() : undefined,
+        competition_session_id: data.session?.id || null,
         ...rules,
         group_count: Number(rules.group_count),
       })})
       setData({...data, draw})
       setReveal(0)
-      await load(data.competition.id)
+      await reload()
     } catch {
       // Kesalahan API sudah ditampilkan oleh pusat pesan aplikasi.
     } finally {
@@ -241,7 +260,16 @@ export function TournamentManager() {
     if (!window.confirm('Kunci drawing? Drawing ulang dan perubahan bagan tidak dapat dilakukan setelah dikunci.')) return
     try {
       await api(`/manage/tournaments/draws/${data.draw.id}/lock`, {method: 'POST'})
-      load(data.competition.id)
+      reload()
+    } catch {
+      // Kesalahan API sudah ditampilkan oleh pusat pesan aplikasi.
+    }
+  }
+  const unlock = async () => {
+    if (!window.confirm('Buka kunci drawing? Bagan resmi dan TV Mode tidak ditayangkan sampai drawing dikunci kembali.')) return
+    try {
+      await api(`/manage/tournaments/draws/${data.draw.id}/unlock`, {method: 'POST'})
+      reload()
     } catch {
       // Kesalahan API sudah ditampilkan oleh pusat pesan aplikasi.
     }
@@ -260,7 +288,7 @@ export function TournamentManager() {
   const forceAuditIds = forceAudit?.registration_ids || []
 
   return <div className="print:bg-white">
-    <div className="mb-7 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end"><div><div className="text-xs font-black uppercase tracking-[.18em] text-blue-600">Tournament desk</div><h1 className="mt-2 font-display text-3xl font-bold">Drawing & Bagan</h1></div><select className="input w-full sm:w-72" value={data.competition.id} onChange={event => load(event.target.value, true)}>{data.competitions.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select></div>
+    <div className="mb-7 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end"><div><div className="text-xs font-black uppercase tracking-[.18em] text-blue-600">Tournament desk</div><h1 className="mt-2 font-display text-3xl font-bold">Drawing & Bagan per Kota</h1>{data.session && <p className="mt-2 text-sm font-bold text-slate-500">{data.session.city} · {data.session.venue}</p>}</div><select aria-label="Pilih lomba dan kota drawing" className="input w-full sm:w-80" value={scopeValue} onChange={event => selectScope(event.target.value)}>{(data.scopes || []).map(scope => <option key={`${scope.competition_id}:${scope.session_id || 0}`} value={`${scope.competition_id}:${scope.session_id || 0}`}>{scope.label}</option>)}</select></div>
 
     <section className="rounded-3xl bg-ink p-5 text-white sm:p-6"><ShieldCheck className="text-electric"/><p className="mt-4 max-w-3xl leading-7 text-slate-300">Drawing memakai peserta yang telah diverifikasi. Tim yang belum lolos verifikasi hanya dapat disertakan melalui keputusan force majeure yang tercatat.</p><div className="mt-5 flex flex-wrap gap-2 text-xs font-bold"><span className="rounded-full bg-emerald-500/20 px-3 py-2 text-emerald-300">{data.drawing_readiness?.verified ?? data.participants.length} terverifikasi</span><span className="rounded-full bg-amber-500/20 px-3 py-2 text-amber-200">{data.drawing_readiness?.force_majeure_candidates ?? candidates.length} kandidat force majeure</span>{data.drawing_readiness?.rejected > 0 && <span className="rounded-full bg-rose-500/20 px-3 py-2 text-rose-200">{data.drawing_readiness.rejected} ditolak</span>}</div></section>
 
@@ -280,11 +308,12 @@ export function TournamentManager() {
     </section>}
 
     {data.draw && <>
-      <section className="mt-6 rounded-3xl bg-white p-4 sm:p-7"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="text-xs font-bold uppercase tracking-wider text-blue-600">Hasil Drawing · Versi {data.draw.version}</div><h2 className="mt-1 font-display text-2xl font-bold">{formatLabels[data.draw.format]}</h2><p className="mt-1 text-xs text-slate-400">{dateTime(data.draw.drawn_at)} · Operator {data.draw.operator?.name}</p></div><div className="grid w-full gap-2 sm:flex sm:w-auto sm:flex-wrap"><button className="btn-ghost" onClick={download}><Download size={15}/>Unduh</button><button className="btn-ghost" onClick={() => window.print()}><Printer size={15}/>Cetak</button>{!locked && <button className="btn-dark" onClick={lock}><LockKeyhole size={15}/>Kunci Drawing</button>}</div></div>
+      <section className="mt-6 rounded-3xl bg-white p-4 sm:p-7"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="text-xs font-bold uppercase tracking-wider text-blue-600">Hasil Drawing · Versi {data.draw.version}</div><h2 className="mt-1 font-display text-2xl font-bold">{formatLabels[data.draw.format]}</h2><p className="mt-1 text-xs text-slate-400">{dateTime(data.draw.drawn_at)} · Operator {data.draw.operator?.name}</p></div><div className="grid w-full gap-2 sm:flex sm:w-auto sm:flex-wrap"><button className="btn-ghost" onClick={download}><Download size={15}/>Unduh</button><button className="btn-ghost" onClick={() => window.print()}><Printer size={15}/>Cetak</button>{!locked && <button className="btn-dark" onClick={lock}><LockKeyhole size={15}/>Kunci Drawing</button>}{locked && data.can_unlock && <button className="btn-ghost border-amber-300 text-amber-700" onClick={unlock}><LockKeyhole size={15}/>Buka Kunci</button>}{locked && !data.can_unlock && <span className="rounded-xl bg-slate-100 px-4 py-3 text-xs font-bold text-slate-500"><LockKeyhole className="mr-1 inline" size={14}/>Drawing terkunci</span>}</div></div>
         {forceAudit && <div className="mt-5 rounded-2xl border border-amber-300 bg-amber-50 p-4"><div className="flex items-center gap-2 font-display font-bold text-amber-950"><AlertTriangle size={18}/>Audit force majeure</div><p className="mt-2 text-sm leading-6 text-amber-900">{forceAudit.reason}</p><p className="mt-2 text-xs font-bold text-amber-700">Disetujui {forceAudit.approved_by?.name} · {dateTime(forceAudit.approved_at)} · {forceAudit.teams?.length || 0} tim</p></div>}
         <div className="mt-6 grid gap-2 sm:grid-cols-2">{data.draw.entries.slice(0, reveal).map(entry => <div key={entry.id} className={`rounded-xl border p-3 ${forceAuditIds.includes(entry.registration_id) ? 'border-amber-300 bg-amber-50' : ''}`}><span className="mr-3 inline-grid size-7 place-items-center rounded-full bg-blue-600 text-xs font-bold text-white">{entry.slot_number}</span><b>{entry.is_bye ? 'BYE' : nameOf(entry.registration)}</b>{forceAuditIds.includes(entry.registration_id) && <span className="ml-2 rounded-full bg-amber-200 px-2 py-1 text-[10px] font-black uppercase text-amber-800">Force majeure</span>}<span className="ml-2 text-xs text-slate-400">{entry.group_name || entry.registration?.school_name}</span></div>)}</div>
       </section>
-      <section className="mt-6"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="font-display text-2xl font-bold">Bagan Pertandingan</h2>{data.draw.format === 'groups_knockout' && !data.draw.matches.some(match => match.stage === 'knockout') && <button className="btn-dark" onClick={async () => {try {await api(`/manage/tournaments/draws/${data.draw.id}/knockout`, {method: 'POST'}); load(data.competition.id)} catch { /* Pusat pesan aplikasi menampilkan kesalahan. */ }}}>Buat Babak Knockout</button>}</div><div className="grid gap-5 xl:grid-cols-2">{data.draw.matches.map(match => <MatchEditor key={match.id} match={match} reload={() => load(data.competition.id)} locked={locked}/>)}</div></section>
+      <GroupStandings groups={data.draw.group_standings}/>
+      <section className="mt-6"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="font-display text-2xl font-bold">Bagan Pertandingan</h2>{data.draw.format === 'groups_knockout' && !data.draw.matches.some(match => match.stage === 'knockout') && <button className="btn-dark" onClick={async () => {try {await api(`/manage/tournaments/draws/${data.draw.id}/knockout`, {method: 'POST'}); reload()} catch { /* Pusat pesan aplikasi menampilkan kesalahan. */ }}}>Buat Babak Knockout</button>}</div><div className="grid gap-5 xl:grid-cols-2">{data.draw.matches.map(match => <MatchEditor key={match.id} match={match} reload={reload} locked={locked}/>)}</div></section>
       <section className="mt-6 rounded-3xl bg-white p-5"><h2 className="font-display font-bold">Riwayat Drawing Ulang</h2><div className="mt-3 flex flex-wrap gap-2">{data.history.map(item => <span key={item.id} className="rounded-full bg-slate-100 px-3 py-2 text-xs font-bold">Versi {item.version} · {item.mode} · {dateTime(item.drawn_at)} · {item.status}</span>)}</div></section>
     </>}
   </div>

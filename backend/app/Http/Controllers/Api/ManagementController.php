@@ -37,6 +37,7 @@ class ManagementController extends Controller
         }
         $cities = $venueQuery->with(['sessions'=>fn ($session) => $session
             ->whereIn('competition_id', $competitionIds)
+            ->with('competition:id,title')
             ->withCount([
                 'registrations',
                 'registrations as approved_registrations_count'=>fn ($registration) => $registration->where('status', 'approved'),
@@ -55,6 +56,14 @@ class ManagementController extends Controller
             'approved_count'=>$venue->sessions->sum('approved_registrations_count'),
             'pending_count'=>$venue->sessions->sum('pending_registrations_count'),
             'quota'=>$venue->sessions->sum('quota'),
+            'competition_quotas'=>$venue->sessions
+                ->sortBy(fn (CompetitionSession $session) => $session->competition->title)
+                ->map(fn (CompetitionSession $session) => [
+                    'id'=>$session->id,
+                    'title'=>$session->competition->title,
+                    'filled'=>(int) $session->registrations_count,
+                    'quota'=>(int) $session->quota,
+                ])->values(),
         ])->values();
         return [
             'competitions' => $competitionIds->count(), 'registrations' => (clone $regs)->count(),

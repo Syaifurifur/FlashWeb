@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Competition;
+use App\Models\CompetitionSession;
 use App\Models\CompetitionNotification;
 use App\Models\TournamentDraw;
 use App\Models\TournamentMatch;
@@ -13,6 +14,7 @@ use App\Models\CompetitionResult;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Collection;
 
 class ScheduleController extends Controller
 {
@@ -29,9 +31,51 @@ class ScheduleController extends Controller
         abort_unless($this->competitions($request)->whereKey($competition->id)->exists(), 403);
     }
 
-    private function venues(Competition $competition): array
+    private function accessibleSessions(Request $request, Competition $competition)
     {
-        return $competition->schedule_venues ?: ['Lapangan 1', 'Lapangan 2', 'Lapangan 3'];
+        $query = $competition->sessions()->where('is_active', true);
+        $user = $request->user();
+        if ($user->role === 'super_admin' || $user->hasPermission('competitions.manage')) return $query;
+        $assignedIds = $user->assignedCompetitionSessions()
+            ->where('competition_sessions.competition_id', $competition->id)->pluck('competition_sessions.id');
+        return $assignedIds->isNotEmpty() ? $query->whereIn('competition_sessions.id', $assignedIds) : $query;
+    }
+
+    private function scopeOptions(Request $request): Collection
+    {
+        return $this->competitions($request)->orderBy('title')->get()->flatMap(function (Competition $competition) use ($request) {
+            $hasSessions = $competition->sessions()->exists();
+            $sessions = $this->accessibleSessions($request, $competition)->with('venueRecord:id,slug,city,name')->get();
+            if (! $hasSessions) return [[
+                'competition_id'=>$competition->id, 'session_id'=>null, 'competition_title'=>$competition->title,
+                'city'=>null, 'venue'=>null, 'label'=>$competition->title,
+            ]];
+            return $sessions->map(fn (CompetitionSession $session) => [
+                'competition_id'=>$competition->id, 'session_id'=>$session->id, 'competition_title'=>$competition->title,
+                'city'=>$session->city, 'venue'=>$session->venue, 'venue_slug'=>$session->venueRecord?->slug,
+                'label'=>$competition->title.' · '.$session->city,
+            ]);
+        })->values();
+    }
+
+    private function selectedScope(Request $request): ?array
+    {
+        $scopes = $this->scopeOptions($request);
+        if ($request->filled('session_id')) return $scopes->first(fn ($scope) => (int)$scope['session_id'] === $request->integer('session_id'));
+        if ($request->filled('competition_id')) return $scopes->first(fn ($scope) => (int)$scope['competition_id'] === $request->integer('competition_id'));
+        return $scopes->first();
+    }
+
+    private function requestedSession(Request $request, Competition $competition): ?CompetitionSession
+    {
+        if (! $competition->sessions()->exists()) return null;
+        abort_unless($request->filled('competition_session_id'), 422, 'Pilih kota pelaksanaan terlebih dahulu.');
+        return $this->accessibleSessions($request, $competition)->whereKey($request->integer('competition_session_id'))->firstOrFail();
+    }
+
+    private function venues(Competition $competition, ?CompetitionSession $session = null): array
+    {
+        return $session?->schedule_venues ?: $competition->schedule_venues ?: ['Lapangan 1', 'Lapangan 2', 'Lapangan 3'];
     }
 
     private function matchQuery(TournamentDraw $draw)
@@ -43,15 +87,18 @@ class ScheduleController extends Controller
         ])->orderBy('match_number');
     }
 
-    private function payload(Competition $competition, ?TournamentDraw $draw): array
+    private function payload(Competition $competition, ?CompetitionSession $session, ?TournamentDraw $draw): array
     {
         $matches = $draw ? $this->matchQuery($draw)->get() : collect();
-        $blocks = $competition->scheduleBlocks()->when($draw, fn ($query) => $query->where(function ($q) use ($draw) {
+        $blocks = $competition->scheduleBlocks()->where('competition_session_id', $session?->id)->when($draw, fn ($query) => $query->where(function ($q) use ($draw) {
             $q->whereNull('tournament_draw_id')->orWhere('tournament_draw_id', $draw->id);
         }))->orderBy('starts_at')->get();
 
         return [
-            'competition' => [...$competition->only(['id','title','slug','category','event_date']), 'venues' => $this->venues($competition)],
+            'competition' => [...$competition->only(['id','title','slug','category','event_date']),
+                'event_date'=>$session?->competition_start_date?->format('Y-m-d') ?: $competition->event_date?->format('Y-m-d'),
+                'venues' => $this->venues($competition,$session)],
+            'session' => $session?->only(['id','competition_id','venue_id','city','venue','competition_start_date','competition_end_date','schedule_venues']),
             'timezone' => self::TIMEZONE,
             'timezone_label' => 'WIB',
             'utc_offset' => '+07:00',
@@ -65,21 +112,25 @@ class ScheduleController extends Controller
 
     public function manage(Request $request)
     {
+        $scopes = $this->scopeOptions($request);
+        $scope = $this->selectedScope($request);
         $options = $this->competitions($request)->orderBy('title')->get(['id','title','slug','category']);
-        $competition = $request->filled('competition_id')
-            ? $this->competitions($request)->whereKey($request->integer('competition_id'))->firstOrFail()
-            : $this->competitions($request)->orderBy('title')->first();
-        if (!$competition) return ['competitions' => $options, 'competition' => null, 'draw' => null, 'matches' => [], 'blocks' => [], 'conflicts' => []];
-        $draw = $competition->tournamentDraws()->latest('version')->first();
-        return ['competitions' => $options, ...$this->payload($competition, $draw)];
+        if (!$scope) return ['scopes'=>$scopes,'competitions' => $options, 'competition' => null, 'session'=>null, 'draw' => null, 'matches' => [], 'blocks' => [], 'conflicts' => []];
+        $competition = $this->competitions($request)->whereKey($scope['competition_id'])->firstOrFail();
+        $session = $scope['session_id']?$this->accessibleSessions($request,$competition)->whereKey($scope['session_id'])->firstOrFail():null;
+        $draw = $competition->tournamentDraws()->where('competition_session_id',$session?->id)->latest('version')->first();
+        return ['scopes'=>$scopes,'competitions' => $options, ...$this->payload($competition,$session,$draw)];
     }
 
     public function configureVenues(Request $request, Competition $competition)
     {
         $this->authorizeCompetition($request, $competition);
-        $data = $request->validate(['venues' => 'required|array|min:1|max:20', 'venues.*' => 'required|string|max:160|distinct']);
-        $competition->update(['schedule_venues' => array_values($data['venues'])]);
-        return $this->payload($competition->fresh(), $competition->tournamentDraws()->latest('version')->first());
+        $data = $request->validate(['competition_session_id'=>'nullable|integer|exists:competition_sessions,id','venues' => 'required|array|min:1|max:20', 'venues.*' => 'required|string|max:160|distinct']);
+        $session = $this->requestedSession($request,$competition);
+        if($session)$session->update(['schedule_venues'=>array_values($data['venues'])]);
+        else $competition->update(['schedule_venues' => array_values($data['venues'])]);
+        $draw = $competition->tournamentDraws()->where('competition_session_id',$session?->id)->latest('version')->first();
+        return $this->payload($competition->fresh(),$session?->fresh(),$draw);
     }
 
     public function generate(Request $request, Competition $competition)
@@ -96,13 +147,16 @@ class ScheduleController extends Controller
             'venues.*' => 'required|string|max:160|distinct',
             'replace_existing' => 'sometimes|boolean',
             'notify' => 'sometimes|boolean',
+            'competition_session_id' => 'nullable|integer|exists:competition_sessions,id',
         ]);
 
-        $configuredVenues = collect($this->venues($competition));
+        $session = $this->requestedSession($request,$competition);
+
+        $configuredVenues = collect($this->venues($competition,$session));
         $venues = collect($data['venues'])->values();
         abort_if($venues->diff($configuredVenues)->isNotEmpty(), 422, 'Pilihan lapangan tidak tersedia pada lomba ini.');
 
-        $draw = $competition->tournamentDraws()->latest('version')->first();
+        $draw = $competition->tournamentDraws()->where('competition_session_id',$session?->id)->latest('version')->first();
         abort_unless($draw, 422, 'Buat drawing dan bagan terlebih dahulu sebelum membuat jadwal otomatis.');
 
         $matches = $draw->matches()->orderBy('round_number')->orderBy('match_number')->get();
@@ -117,7 +171,7 @@ class ScheduleController extends Controller
 
         $targetIds = $targets->pluck('id');
         $fixedMatches = $matches->reject(fn (TournamentMatch $match) => $targetIds->contains($match->id) || !$match->scheduled_at)->values();
-        $blocks = $competition->scheduleBlocks()->where(function ($query) use ($draw) {
+        $blocks = $competition->scheduleBlocks()->where('competition_session_id',$session?->id)->where(function ($query) use ($draw) {
             $query->whereNull('tournament_draw_id')->orWhere('tournament_draw_id', $draw->id);
         })->get();
 
@@ -170,15 +224,16 @@ class ScheduleController extends Controller
         if ($request->boolean('notify')) {
             CompetitionNotification::create([
                 'competition_id' => $competition->id,
+                'competition_session_id' => $session?->id,
                 'author_id' => $request->user()->id,
                 'title' => 'Jadwal Pertandingan Telah Dibuat',
-                'message' => $planned->count().' pertandingan dijadwalkan otomatis pada '.$firstStart->copy()->timezone(self::TIMEZONE)->format('d M Y H:i').' WIB sampai '.$lastEnd->copy()->timezone(self::TIMEZONE)->format('d M Y H:i').' WIB.',
+                'message' => ($session?->city ? $session->city.': ' : '').$planned->count().' pertandingan dijadwalkan otomatis pada '.$firstStart->copy()->timezone(self::TIMEZONE)->format('d M Y H:i').' WIB sampai '.$lastEnd->copy()->timezone(self::TIMEZONE)->format('d M Y H:i').' WIB.',
                 'published_at' => now(),
             ]);
         }
 
         return [
-            ...$this->payload($competition->fresh(), $draw->fresh()),
+            ...$this->payload($competition->fresh(), $session?->fresh(), $draw->fresh()),
             'automation' => [
                 'scheduled_count' => $planned->count(),
                 'waiting_count' => $matches->filter(fn ($match) => !$match->participant_a_id || !$match->participant_b_id)->count(),
@@ -212,9 +267,11 @@ class ScheduleController extends Controller
 
     public function updateMatch(Request $request, TournamentMatch $match)
     {
-        $match->load('tournamentDraw.competition');
+        $match->load('tournamentDraw.competition','tournamentDraw.competitionSession');
         $competition = $match->tournamentDraw->competition;
         $this->authorizeCompetition($request, $competition);
+        $session = $match->tournamentDraw->competitionSession;
+        if($session)abort_unless($this->accessibleSessions($request,$competition)->whereKey($session->id)->exists(),403);
         $data = $request->validate([
             'scheduled_at' => 'nullable|date', 'venue' => 'nullable|string|max:160',
             'duration_minutes' => 'required|integer|min:5|max:720',
@@ -257,50 +314,56 @@ class ScheduleController extends Controller
         if (in_array($match->status, ['completed','walkover'], true) && $match->winner_id && preg_match('/\bfinal\b/i', $match->round_label)) {
             $loserId = $match->winner_id === $match->participant_a_id ? $match->participant_b_id : $match->participant_a_id;
             CompetitionResult::updateOrCreate(
-                ['competition_id'=>$competition->id, 'competition_session_id'=>null, 'rank'=>1, 'source'=>'tournament'],
+                ['competition_id'=>$competition->id, 'competition_session_id'=>$session?->id, 'rank'=>1, 'source'=>'tournament'],
                 ['registration_id'=>$match->winner_id, 'title'=>'Juara 1', 'announced_at'=>now()]
             );
             if ($loserId) CompetitionResult::updateOrCreate(
-                ['competition_id'=>$competition->id, 'competition_session_id'=>null, 'rank'=>2, 'source'=>'tournament'],
+                ['competition_id'=>$competition->id, 'competition_session_id'=>$session?->id, 'rank'=>2, 'source'=>'tournament'],
                 ['registration_id'=>$loserId, 'title'=>'Juara 2', 'announced_at'=>now()]
             );
         }
 
         if ($notify) $this->notifyParticipants($request, $competition, $match);
-        return $this->payload($competition->fresh(), $match->tournamentDraw->fresh());
+        return $this->payload($competition->fresh(),$session?->fresh(),$match->tournamentDraw->fresh());
     }
 
     public function storeBlock(Request $request, Competition $competition)
     {
         $this->authorizeCompetition($request, $competition);
         $data = $this->validateBlock($request);
-        $draw = $competition->tournamentDraws()->latest('version')->first();
-        $candidate = new TournamentScheduleBlock([...$data, 'competition_id' => $competition->id, 'tournament_draw_id' => $draw?->id]);
+        $session = $this->requestedSession($request,$competition);
+        $draw = $competition->tournamentDraws()->where('competition_session_id',$session?->id)->latest('version')->first();
+        $candidate = new TournamentScheduleBlock([...$data, 'competition_id' => $competition->id, 'competition_session_id'=>$session?->id, 'tournament_draw_id' => $draw?->id]);
         if (!($data['force'] ?? false) && ($messages = $this->blockConflicts($candidate))) return response()->json(['message' => 'Blok waktu berbenturan.', 'conflicts' => $messages], 422);
         unset($data['force']);
-        $competition->scheduleBlocks()->create([...$data, 'tournament_draw_id' => $draw?->id, 'created_by' => $request->user()->id]);
-        return response()->json($this->payload($competition->fresh(), $draw), 201);
+        $competition->scheduleBlocks()->create([...$data, 'competition_session_id'=>$session?->id, 'tournament_draw_id' => $draw?->id, 'created_by' => $request->user()->id]);
+        return response()->json($this->payload($competition->fresh(),$session?->fresh(),$draw), 201);
     }
 
     public function updateBlock(Request $request, TournamentScheduleBlock $block)
     {
         $this->authorizeCompetition($request, $block->competition);
+        $session=$block->competitionSession;
+        if($session)abort_unless($this->accessibleSessions($request,$block->competition)->whereKey($session->id)->exists(),403);
         $data = $this->validateBlock($request);
+        unset($data['competition_session_id']);
         $candidate = $block->replicate()->fill($data); $candidate->id = $block->id;
         if (!($data['force'] ?? false) && ($messages = $this->blockConflicts($candidate))) return response()->json(['message' => 'Blok waktu berbenturan.', 'conflicts' => $messages], 422);
         unset($data['force']); $block->update($data);
-        return $this->payload($block->competition->fresh(), $block->tournamentDraw);
+        return $this->payload($block->competition->fresh(),$session?->fresh(),$block->tournamentDraw);
     }
 
     public function destroyBlock(Request $request, TournamentScheduleBlock $block)
     {
-        $this->authorizeCompetition($request, $block->competition); $competition = $block->competition; $draw = $block->tournamentDraw; $block->delete();
-        return $this->payload($competition->fresh(), $draw);
+        $this->authorizeCompetition($request, $block->competition); $competition = $block->competition; $session=$block->competitionSession; $draw = $block->tournamentDraw;
+        if($session)abort_unless($this->accessibleSessions($request,$competition)->whereKey($session->id)->exists(),403);
+        $block->delete();
+        return $this->payload($competition->fresh(),$session?->fresh(),$draw);
     }
 
     private function validateBlock(Request $request): array
     {
-        $data = $request->validate(['title' => 'required|string|max:120', 'venue' => 'required|string|max:160', 'starts_at' => 'required|date', 'duration_minutes' => 'required|integer|min:5|max:720', 'notes' => 'nullable|string|max:1000', 'force' => 'sometimes|boolean']);
+        $data = $request->validate(['competition_session_id'=>'nullable|integer|exists:competition_sessions,id','title' => 'required|string|max:120', 'venue' => 'required|string|max:160', 'starts_at' => 'required|date', 'duration_minutes' => 'required|integer|min:5|max:720', 'notes' => 'nullable|string|max:1000', 'force' => 'sometimes|boolean']);
         $data['starts_at'] = $this->jakartaToUtc($data['starts_at']);
         return $data;
     }
@@ -329,7 +392,7 @@ class ScheduleController extends Controller
             $shared = array_filter(array_intersect([$candidate->participant_a_id,$candidate->participant_b_id], [$other->participant_a_id,$other->participant_b_id]));
             if ($shared) $messages[] = "Peserta yang sama juga bermain di Match {$other->match_number}.";
         }
-        foreach ($match->tournamentDraw->competition->scheduleBlocks as $block) {
+        foreach ($match->tournamentDraw->competition->scheduleBlocks()->where('competition_session_id',$match->tournamentDraw->competition_session_id)->get() as $block) {
             $blockInterval = $this->interval($block, 'starts_at');
             if ($candidate->venue === $block->venue && $blockInterval && $this->overlaps($interval, $blockInterval)) $messages[] = "Lapangan {$candidate->venue} diblokir untuk {$block->title}.";
         }
@@ -339,9 +402,9 @@ class ScheduleController extends Controller
     private function blockConflicts(TournamentScheduleBlock $block): array
     {
         $interval = $this->interval($block, 'starts_at'); $messages = [];
-        $draw = $block->tournamentDraw ?: $block->competition->tournamentDraws()->latest('version')->first();
+        $draw = $block->tournamentDraw ?: $block->competition->tournamentDraws()->where('competition_session_id',$block->competition_session_id)->latest('version')->first();
         foreach ($draw?->matches ?? [] as $match) if ($match->venue === $block->venue && ($other = $this->interval($match)) && $this->overlaps($interval, $other)) $messages[] = "Berbenturan dengan Match {$match->match_number}.";
-        foreach ($block->competition->scheduleBlocks()->whereKeyNot($block->id ?: 0)->get() as $other) if ($other->venue === $block->venue && $this->overlaps($interval, $this->interval($other, 'starts_at'))) $messages[] = "Berbenturan dengan {$other->title}.";
+        foreach ($block->competition->scheduleBlocks()->where('competition_session_id',$block->competition_session_id)->whereKeyNot($block->id ?: 0)->get() as $other) if ($other->venue === $block->venue && $this->overlaps($interval, $this->interval($other, 'starts_at'))) $messages[] = "Berbenturan dengan {$other->title}.";
         return array_values(array_unique($messages));
     }
 
@@ -364,13 +427,19 @@ class ScheduleController extends Controller
     private function notifyParticipants(Request $request, Competition $competition, TournamentMatch $match): void
     {
         $when = $match->scheduled_at ? $match->scheduled_at->timezone('Asia/Jakarta')->format('d M Y H:i').' WIB' : 'belum dijadwalkan';
-        CompetitionNotification::create(['competition_id'=>$competition->id,'author_id'=>$request->user()->id,'title'=>"Pembaruan Jadwal Match {$match->match_number}",'message'=>"{$match->round_label}: {$when}, {$match->venue}. Status: {$match->status}.",'published_at'=>now()]);
+        $session=$match->tournamentDraw->competitionSession;
+        CompetitionNotification::create(['competition_id'=>$competition->id,'competition_session_id'=>$session?->id,'author_id'=>$request->user()->id,'title'=>"Pembaruan Jadwal Match {$match->match_number}",'message'=>($session?->city ? $session->city.' · ' : '')."{$match->round_label}: {$when}, {$match->venue}. Status: {$match->status}.",'published_at'=>now()]);
     }
 
-    public function publicView(string $slug)
+    public function publicView(Request $request, string $slug)
     {
         $competition = Competition::where('event_edition_id', EventEdition::resolveCurrent(true)->id)->where('slug', $slug)->firstOrFail();
-        $draw = $competition->tournamentDraws()->where('status','locked')->latest('version')->first();
-        return $this->payload($competition, $draw);
+        $sessions=$competition->sessions()->where('is_active',true)->with('venueRecord:id,slug,city,name')->get();
+        $session=$request->filled('session_id')?$sessions->firstWhere('id',$request->integer('session_id'))
+            :($request->filled('city')?$sessions->first(fn($item)=>$item->venueRecord?->slug===$request->string('city')->toString()):$sessions->first());
+        if($sessions->isNotEmpty())abort_unless($session,404);
+        $draw = $competition->tournamentDraws()->where('competition_session_id',$session?->id)->where('status','locked')->latest('version')->first();
+        return ['sessions'=>$sessions->map(fn($item)=>[...$item->only(['id','city','venue','competition_start_date','competition_end_date']),'venue_slug'=>$item->venueRecord?->slug])->values(),
+            ...$this->payload($competition,$session,$draw)];
     }
 }

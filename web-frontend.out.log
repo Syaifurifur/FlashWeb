@@ -1,0 +1,32 @@
+
+> frontend@0.0.0 dev
+> vite --host 127.0.0.1 --port 5173
+
+
+  VITE v8.1.0  ready in 4825 ms
+
+  ➜  Local:   http://127.0.0.1:5173/
+16.58.26 [vite] (client) hmr update /src/App.jsx, /src/index.css
+17.03.07 [vite] (client) hmr update /src/App.jsx, /src/index.css
+17.20.42 [vite] (client) hmr update /src/App.jsx, /src/index.css
+18.18.16 [vite] (client) hmr update /src/TournamentManager.jsx, /src/index.css
+18.18.33 [vite] (client) hmr update /src/TournamentManager.jsx, /src/index.css
+20.53.01 [vite] (client) hmr update /src/Schedule.jsx, /src/index.css
+20.53.34 [vite] (client) hmr update /src/Schedule.jsx, /src/index.css
+20.55.36 [vite] (client) hmr update /src/Schedule.jsx, /src/index.css
+21.08.30 [vite] (client) hmr update /src/Tournament.jsx, /src/index.css
+21.10.08 [vite] (client) hmr update /src/Tournament.jsx, /src/index.css
+21.10.33 [vite] (client) hmr update /src/Tournament.jsx, /src/index.css
+21.11.28 [vite] (client) hmr update /src/Tournament.jsx, /src/index.css
+21.39.58 [vite] (client) hmr update /src/TournamentManager.jsx, /src/index.css
+21.43.30 [vite] (client) hmr update /src/Tournament.jsx, /src/index.css
+21.43.32 [vite] (client) hmr update /src/TournamentManager.jsx, /src/index.css
+21.54.56 [vite] (client) hmr update /src/TournamentManager.jsx, /src/index.css
+21.55.31 [vite] (client) hmr update /src/Schedule.jsx, /src/index.css
+21.56.08 [vite] (client) hmr update /src/Tournament.jsx, /src/index.css
+21.56.16 [vite] (client) hmr update /src/Tournament.jsx, /src/index.css
+21.56.23 [vite] (client) hmr update /src/Tournament.jsx, /src/index.css
+21.56.52 [vite] (client) hmr update /src/Schedule.jsx, /src/index.css
+21.57.14 [vite] (client) hmr update /src/Schedule.jsx, /src/index.css
+21.58.02 [vite] (client) hmr update /src/Tournament.jsx, /src/index.css
+22.08.45 [vite] (client) hmr update /src/Tournament.jsx, /src/index.css

@@ -23,6 +23,7 @@ class CompetitionNotification extends Model
     }
 
     public function competition() { return $this->belongsTo(Competition::class); }
+    public function competitionSession() { return $this->belongsTo(CompetitionSession::class); }
     public function eventEdition() { return $this->belongsTo(EventEdition::class); }
     public function author() { return $this->belongsTo(User::class, 'author_id'); }
 }
