@@ -2206,3 +2206,19 @@
   2026-08-24 22:10:54 /api/competitions/bola-voli-putra/schedule ......................................... ~ 505.81ms
   2026-08-24 22:11:00 /api/competitions/bola-voli-putra/schedule ......................................... ~ 505.62ms
   2026-08-24 22:11:01 /api/competitions/bola-voli-putra/schedule ........................................... ~ 0.45ms
+  2026-08-24 22:11:12 /api/competitions/futsal-putra/schedule .............................................. ~ 1.56ms
+  2026-08-24 22:11:13 /api/competitions/futsal-putra/schedule .............................................. ~ 0.14ms
+  2026-08-24 22:11:13 /api/competitions/futsal-putra/schedule ............................................ ~ 502.00ms
+  2026-08-24 22:11:13 /api/competitions/futsal-putra/schedule .............................................. ~ 0.15ms
+  2026-08-24 22:11:14 /api/competitions/bola-voli-putra/schedule ........................................... ~ 1.91ms
+  2026-08-24 22:11:15 /api/competitions/bola-voli-putra/schedule ........................................... ~ 0.26ms
+  2026-08-24 22:11:30 /api/competitions/bola-voli-putra/schedule ........................................... ~ 2.06ms
+  2026-08-24 22:11:31 /api/competitions/bola-voli-putra/schedule ........................................... ~ 0.38ms
+  2026-08-24 22:11:44 /api/competitions/bola-voli-putra/schedule ........................................... ~ 0.27ms
+  2026-08-24 22:11:45 /api/competitions/bola-voli-putra/schedule ......................................... ~ 513.60ms
+  2026-08-24 22:12:12 /api/competitions/futsal-putra/schedule .............................................. ~ 1.58ms
+  2026-08-24 22:12:13 /api/competitions/futsal-putra/schedule .............................................. ~ 0.14ms
+  2026-08-24 22:12:13 /api/competitions/bola-voli-putra/schedule ......................................... ~ 509.34ms
+  2026-08-24 22:12:13 /api/competitions/futsal-putra/schedule ............................................ ~ 510.41ms
+  2026-08-24 22:12:13 /api/competitions/bola-voli-putra/schedule ........................................... ~ 0.27ms
+  2026-08-24 22:12:13 /api/competitions/futsal-putra/schedule ............................................ ~ 515.46ms
