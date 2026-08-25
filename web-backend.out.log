@@ -2222,3 +2222,9 @@
   2026-08-24 22:12:13 /api/competitions/futsal-putra/schedule ............................................ ~ 510.41ms
   2026-08-24 22:12:13 /api/competitions/bola-voli-putra/schedule ........................................... ~ 0.27ms
   2026-08-24 22:12:13 /api/competitions/futsal-putra/schedule ............................................ ~ 515.46ms
+  2026-08-24 22:13:12 /api/competitions/bola-voli-putra/schedule ........................................... ~ 0.91ms
+  2026-08-24 22:13:13 /api/competitions/futsal-putra/schedule .............................................. ~ 0.23ms
+  2026-08-24 22:13:13 /api/competitions/futsal-putra/schedule ............................................ ~ 503.52ms
+  2026-08-24 22:13:13 /api/competitions/bola-voli-putra/schedule ......................................... ~ 503.42ms
+  2026-08-24 22:13:13 /api/competitions/futsal-putra/schedule .............................................. ~ 1.07ms
+  2026-08-24 22:13:13 /api/competitions/futsal-putra/schedule .............................................. ~ 0.17ms
