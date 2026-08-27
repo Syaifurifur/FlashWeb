@@ -31,11 +31,14 @@ class TournamentController extends Controller
     {
         $query = $competition->sessions()->where('is_active', true);
         $user = $request->user();
-        if ($user->role === 'super_admin' || $user->hasPermission('competitions.manage')) return $query;
+        if ($user->managesAllLocations()) return $query;
 
-        $assignedIds = $user->assignedCompetitionSessions()
-            ->where('competition_sessions.competition_id', $competition->id)->pluck('competition_sessions.id');
-        return $assignedIds->isNotEmpty() ? $query->whereIn('competition_sessions.id', $assignedIds) : $query;
+        return $query->whereIn(
+            'competition_sessions.id',
+            $user->manageableCompetitionSessionsQuery(EventEdition::resolveCurrent()->id)
+                ->where('competition_sessions.competition_id', $competition->id)
+                ->select('competition_sessions.id')
+        );
     }
 
     private function scopeOptions(Request $request): Collection

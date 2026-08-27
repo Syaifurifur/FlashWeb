@@ -79,6 +79,64 @@ class User extends Authenticatable
             ->withTimestamps();
     }
 
+    public function managesAllLocations(): bool
+    {
+        return $this->role === 'super_admin' || $this->hasPermission('competitions.manage');
+    }
+
+    public function manageableCompetitionSessionsQuery(int $editionId): Builder
+    {
+        $query = CompetitionSession::query()->whereHas('competition', fn (Builder $competition) =>
+            $competition->where('event_edition_id', $editionId)
+        );
+
+        if ($this->managesAllLocations()) {
+            return $query;
+        }
+
+        if ($this->role === 'pic') {
+            return $query->where(function (Builder $sessions) {
+                $sessions->where('pic_user_id', $this->id)
+                    ->orWhereHas('pics', fn (Builder $pics) => $pics->whereKey($this->id));
+            });
+        }
+
+        if ($this->role === 'spv') {
+            return $query->where(function (Builder $sessions) {
+                $sessions->where('supervisor_user_id', $this->id)
+                    ->orWhereHas('supervisors', fn (Builder $supervisors) => $supervisors->whereKey($this->id));
+            });
+        }
+
+        return $this->competition_id
+            ? $query->where('competition_id', $this->competition_id)
+            : $query->whereRaw('1 = 0');
+    }
+
+    public function manageableRegistrationsQuery(int $editionId): Builder
+    {
+        $query = Registration::query()->whereIn(
+            'registrations.competition_id',
+            $this->manageableCompetitionsQuery($editionId)->select('id')
+        );
+
+        if (! $this->managesAllLocations() && in_array($this->role, ['pic', 'spv'], true)) {
+            $sessionIds = $this->manageableCompetitionSessionsQuery($editionId)->select('competition_sessions.id');
+            $query->where(function (Builder $registrations) use ($sessionIds) {
+                $registrations->whereIn('registrations.competition_session_id', $sessionIds);
+                if ($this->role === 'pic' && $this->competition_id) {
+                    $registrations->orWhere(function (Builder $legacy) {
+                        $legacy->whereNull('registrations.competition_session_id')
+                            ->where('registrations.competition_id', $this->competition_id)
+                            ->whereDoesntHave('competition.sessions');
+                    });
+                }
+            });
+        }
+
+        return $query;
+    }
+
     public function manageableCompetitionsQuery(int $editionId): Builder
     {
         $query = Competition::query()->where('event_edition_id', $editionId);

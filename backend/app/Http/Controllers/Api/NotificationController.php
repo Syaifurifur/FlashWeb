@@ -12,15 +12,21 @@ class NotificationController extends Controller
 {
     private function canManageAll(Request $request): bool
     {
-        return $request->user()->role === 'super_admin' || $request->user()->hasPermission('competitions.manage');
+        return $request->user()->managesAllLocations();
     }
 
     public function index(Request $request)
     {
         $editionId = EventEdition::resolveCurrent()->id;
-        $query = CompetitionNotification::where('event_edition_id', $editionId)->with(['competition:id,title', 'author:id,name'])->latest('published_at');
+        $query = CompetitionNotification::where('event_edition_id', $editionId)
+            ->with(['competition:id,title', 'competitionSession:id,competition_id,city,venue', 'author:id,name'])
+            ->latest('published_at');
         if (! $this->canManageAll($request)) {
-            $query->whereIn('competition_id', $request->user()->manageableCompetitionsQuery($editionId)->select('id'));
+            $sessionIds = $request->user()->manageableCompetitionSessionsQuery($editionId)->select('competition_sessions.id');
+            $query->whereIn('competition_id', $request->user()->manageableCompetitionsQuery($editionId)->select('id'))
+                ->where(fn ($notifications) => $notifications
+                    ->whereNull('competition_session_id')
+                    ->orWhereIn('competition_session_id', $sessionIds));
         }
 
         return $query->limit(100)->get();
@@ -38,6 +44,7 @@ class NotificationController extends Controller
         if (! empty($data['competition_session_id'])) {
             $session=CompetitionSession::findOrFail($data['competition_session_id']);
             abort_unless(!empty($data['competition_id']) && (int)$data['competition_id']===$session->competition_id,422,'Kota pelaksanaan tidak sesuai dengan lomba yang dipilih.');
+            abort_unless($session->competition?->event_edition_id === EventEdition::resolveCurrent()->id, 422, 'Kota pelaksanaan tidak berasal dari tahun aktif.');
         }
 
         if (! $this->canManageAll($request)) {
@@ -46,6 +53,15 @@ class NotificationController extends Controller
                 && $request->user()->manageableCompetitionsQuery(EventEdition::resolveCurrent()->id)->whereKey($data['competition_id'])->exists(),
                 403
             );
+            $hasLocations = CompetitionSession::where('competition_id', $data['competition_id'])->exists();
+            if ($hasLocations) {
+                abort_unless(! empty($data['competition_session_id']), 422, 'Pilih tempat tujuan notifikasi.');
+                abort_unless(
+                    $request->user()->manageableCompetitionSessionsQuery(EventEdition::resolveCurrent()->id)
+                        ->whereKey($data['competition_session_id'])->exists(),
+                    403
+                );
+            }
         }
 
         $notification = CompetitionNotification::create([
@@ -55,7 +71,7 @@ class NotificationController extends Controller
             'published_at'=>now(),
         ]);
 
-        return response()->json($notification->load(['competition:id,title', 'author:id,name']), 201);
+        return response()->json($notification->load(['competition:id,title', 'competitionSession:id,competition_id,city,venue', 'author:id,name']), 201);
     }
 
     public function destroy(Request $request, CompetitionNotification $notification)
@@ -66,6 +82,14 @@ class NotificationController extends Controller
                 && $request->user()->manageableCompetitionsQuery(EventEdition::resolveCurrent()->id)->whereKey($notification->competition_id)->exists(),
                 403
             );
+            if (CompetitionSession::where('competition_id', $notification->competition_id)->exists()) {
+                abort_unless(
+                    $notification->competition_session_id
+                    && $request->user()->manageableCompetitionSessionsQuery(EventEdition::resolveCurrent()->id)
+                        ->whereKey($notification->competition_session_id)->exists(),
+                    403
+                );
+            }
         }
         $notification->delete();
 

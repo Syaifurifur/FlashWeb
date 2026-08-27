@@ -56,6 +56,13 @@ Setiap perubahan fitur, skema database, API, hak akses, atau alur pengguna wajib
 
 ## Changelog
 
+### 2026-08-27
+
+- Memisahkan seluruh data operasional berdasarkan tempat/sesi pelaksanaan: daftar dan detail pendaftar, ringkasan dashboard, ekspor Excel, drawing, pertandingan, jadwal, blok lapangan, notifikasi, karya, penugasan juri, penguncian penilaian, pengumuman hasil, dan daftar pemenang tidak lagi bercampur antarkota.
+- Membatasi PIC dan SPV hanya pada sesi tempat yang ditugaskan, termasuk pemeriksaan detail, perubahan status, pembayaran, NISN, drawing, jadwal, penilaian, notifikasi, serta ekspor; Super Admin tetap dapat berpindah dan melihat seluruh tempat.
+- Menambahkan filter tempat pada halaman Pendaftar, tujuan tempat pada Notifikasi Peserta, serta pemilih lomba-kota pada Manajemen Penilaian. Panduan/kriteria penilaian tetap menjadi konfigurasi bersama per lomba, sedangkan proses dan hasilnya terpisah per tempat.
+- Menambahkan migrasi status penilaian per sesi, indeks kueri lokasi, migrasi aman hasil lama ke sesi pendaftaran terkait, dan pengujian otomatis isolasi lintas-tempat.
+
 ### 2026-08-24
 
 - Memisahkan drawing, bagan, klasemen, hasil, jadwal, lapangan, blok waktu, notifikasi pertandingan, TV Mode, dan tampilan publik berdasarkan sesi kota; panel panitia serta halaman peserta kini menyediakan pemilih lomba dan kota agar data antarlokasi tidak bercampur.

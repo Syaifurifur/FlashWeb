@@ -21,6 +21,8 @@ class CompetitionSession extends Model
             'submission_end_at' => 'datetime',
             'timeline' => 'array',
             'schedule_venues' => 'array',
+            'judging_locked_at' => 'datetime',
+            'results_announced_at' => 'datetime',
             'fee' => 'decimal:2',
             'quota' => 'integer',
             'pic_slots' => 'integer',
@@ -40,4 +42,6 @@ class CompetitionSession extends Model
     public function registrations() { return $this->hasMany(Registration::class); }
     public function tournamentDraws() { return $this->hasMany(TournamentDraw::class); }
     public function scheduleBlocks() { return $this->hasMany(TournamentScheduleBlock::class); }
+    public function notifications() { return $this->hasMany(CompetitionNotification::class); }
+    public function results() { return $this->hasMany(CompetitionResult::class)->orderBy('rank'); }
 }

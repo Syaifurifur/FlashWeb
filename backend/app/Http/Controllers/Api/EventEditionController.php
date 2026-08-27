@@ -131,6 +131,8 @@ class EventEditionController extends Controller
                     $sessionCopy = $session->replicate();
                     $sessionCopy->competition_id = $copy->id;
                     $sessionCopy->venue_id = $venueMap[$session->venue_id] ?? null;
+                    $sessionCopy->judging_locked_at = null;
+                    $sessionCopy->results_announced_at = null;
                     foreach (['activity_start_date', 'activity_end_date', 'competition_start_date', 'competition_end_date', 'information_at', 'team_update_deadline_at', 'submission_start_at', 'submission_end_at'] as $field) {
                         $sessionCopy->{$field} = $this->shiftDate($session->{$field}, $yearDelta);
                     }

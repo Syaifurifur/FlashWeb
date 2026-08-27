@@ -27,23 +27,39 @@ class ManagementController extends Controller
         return $request->user()->manageableCompetitionsQuery(EventEdition::resolveCurrent()->id);
     }
 
+    private function scopeSessions(Request $request)
+    {
+        return $request->user()->manageableCompetitionSessionsQuery(EventEdition::resolveCurrent()->id);
+    }
+
+    private function scopeRegistrations(Request $request)
+    {
+        return $request->user()->manageableRegistrationsQuery(EventEdition::resolveCurrent()->id);
+    }
+
+    private function authorizeRegistration(Request $request, Registration $registration): void
+    {
+        abort_unless($this->scopeRegistrations($request)->whereKey($registration->id)->exists(), 403);
+    }
+
     public function dashboard(Request $request)
     {
         $competitionIds = $this->scopeCompetitions($request)->pluck('id');
-        $regs = Registration::whereIn('competition_id', $competitionIds);
+        $regs = $this->scopeRegistrations($request);
+        $sessionIds = $request->user()->managesAllLocations() ? null : $this->scopeSessions($request)->pluck('competition_sessions.id');
         $venueQuery = CompetitionVenue::query()->where('event_edition_id', EventEdition::resolveCurrent()->id)->where('is_active', true);
-        if (! ($request->user()->role === 'super_admin' || $request->user()->hasPermission('competitions.manage'))) {
-            $venueQuery->whereHas('sessions', fn ($session) => $session->whereIn('competition_id', $competitionIds));
+        if ($sessionIds !== null) {
+            $venueQuery->whereHas('sessions', fn ($session) => $session->whereIn('competition_sessions.id', $sessionIds));
         }
-        $cities = $venueQuery->with(['sessions'=>fn ($session) => $session
-            ->whereIn('competition_id', $competitionIds)
-            ->with('competition:id,title')
-            ->withCount([
+        $cities = $venueQuery->with(['sessions'=>function ($session) use ($competitionIds, $sessionIds) {
+            $session->whereIn('competition_id', $competitionIds);
+            if ($sessionIds !== null) $session->whereIn('competition_sessions.id', $sessionIds);
+            $session->with('competition:id,title')->withCount([
                 'registrations',
                 'registrations as approved_registrations_count'=>fn ($registration) => $registration->where('status', 'approved'),
                 'registrations as pending_registrations_count'=>fn ($registration) => $registration->where('status', 'pending'),
-            ])
-        ])->orderBy('activity_start_date')->orderBy('city')->get()->map(fn (CompetitionVenue $venue) => [
+            ]);
+        }])->orderBy('activity_start_date')->orderBy('city')->get()->map(fn (CompetitionVenue $venue) => [
             'id'=>$venue->id,
             'slug'=>$venue->slug,
             'city'=>$venue->city,
@@ -69,13 +85,32 @@ class ManagementController extends Controller
             'competitions' => $competitionIds->count(), 'registrations' => (clone $regs)->count(),
             'pending' => (clone $regs)->where('status','pending')->count(),
             'approved' => (clone $regs)->where('status','approved')->count(),
-            'revenue' => Registration::whereIn('competition_id', $competitionIds)->where('status','approved')->join('competitions','competitions.id','=','registrations.competition_id')->sum('competitions.fee'),
-            'recent' => Registration::with('competition:id,title')->whereIn('competition_id',$competitionIds)->latest()->limit(6)->get(),
+            'revenue' => (clone $regs)->where('registrations.status','approved')
+                ->leftJoin('competition_sessions','competition_sessions.id','=','registrations.competition_session_id')
+                ->join('competitions','competitions.id','=','registrations.competition_id')
+                ->sum(DB::raw('COALESCE(competition_sessions.fee, competitions.fee)')),
+            'recent' => (clone $regs)->with(['competition:id,title','competitionSession:id,city,venue'])->latest('registrations.created_at')->limit(6)->get(),
             'cities'=>$cities,
         ];
     }
 
-    public function competitions(Request $request) { return $this->scopeCompetitions($request)->with(['competitionType:id,name,slug,category_group','sessions'=>fn ($query) => $query->with(['pic:id,name,whatsapp','supervisor:id,name,whatsapp','pics:id,name,whatsapp','supervisors:id,name,whatsapp'])->withCount('registrations')])->withCount(['registrations','pics'])->latest()->get(); }
+    public function competitions(Request $request)
+    {
+        $sessionIds = $request->user()->managesAllLocations() ? null : $this->scopeSessions($request)->pluck('competition_sessions.id');
+        return $this->scopeCompetitions($request)
+            ->with([
+                'competitionType:id,name,slug,category_group',
+                'sessions'=>function ($query) use ($sessionIds) {
+                    if ($sessionIds !== null) $query->whereIn('competition_sessions.id', $sessionIds);
+                    $query->with(['pic:id,name,whatsapp','supervisor:id,name,whatsapp','pics:id,name,whatsapp','supervisors:id,name,whatsapp'])
+                        ->withCount('registrations');
+                },
+            ])
+            ->withCount([
+                'registrations'=>fn ($query) => $sessionIds === null ? $query : $query->whereIn('competition_session_id', $sessionIds),
+                'pics',
+            ])->latest()->get();
+    }
 
     public function storeCompetition(Request $request)
     {
@@ -448,25 +483,33 @@ class ManagementController extends Controller
     {
         $request->validate([
             'competition_id'=>'nullable|integer|exists:competitions,id',
+            'session_id'=>'nullable|integer|exists:competition_sessions,id',
             'page'=>'nullable|integer|min:1',
             'per_page'=>'nullable|integer|in:10,20,50,100',
         ]);
-        $ids=$this->scopeCompetitions($request)->pluck('id');
-        $q=Registration::with('competition:id,title,category', 'competitionSession')->whereIn('competition_id',$ids);
+        $q=$this->scopeRegistrations($request)->with('competition:id,title,category', 'competitionSession');
         if($request->filled('status')&&$request->status!=='all')$q->where('status',$request->status);
         if($request->filled('competition_id'))$q->where('competition_id',$request->integer('competition_id'));
+        if($request->filled('session_id')) {
+            abort_unless($this->scopeSessions($request)->whereKey($request->integer('session_id'))->exists(), 403);
+            $q->where('competition_session_id',$request->integer('session_id'));
+        }
         if($request->filled('search'))$q->where(fn($x)=>$x->where('full_name','like','%'.$request->search.'%')->orWhere('team_name','like','%'.$request->search.'%')->orWhere('ticket_code','like','%'.$request->search.'%')->orWhere('school_name','like','%'.$request->search.'%'));
         return $q->latest()->paginate($request->integer('per_page', 20))->withQueryString();
     }
 
     public function registrationCompetitions(Request $request)
     {
-        return $this->scopeCompetitions($request)->orderBy('title')->get(['id','title']);
+        $sessionIds = $request->user()->managesAllLocations() ? null : $this->scopeSessions($request)->pluck('competition_sessions.id');
+        return $this->scopeCompetitions($request)->with(['sessions'=>function ($query) use ($sessionIds) {
+            $query->where('is_active', true)->orderBy('sort_order');
+            if ($sessionIds !== null) $query->whereIn('competition_sessions.id', $sessionIds);
+        }])->orderBy('title')->get(['id','title']);
     }
 
     public function registration(Request $request, Registration $registration)
     {
-        abort_unless($this->scopeCompetitions($request)->whereKey($registration->competition_id)->exists(),403);
+        $this->authorizeRegistration($request, $registration);
         $registration->load('competition:id,title,category,participation_type,team_size,official_count,fee,submission_start_at,submission_end_at,team_update_deadline_at,document_upload_deadline_at', 'competitionSession', 'members', 'officials');
         if ($registration->competition->participation_type === 'team' && $registration->members->isEmpty()) {
             $registration->setRelation('members', collect([new RegistrationMember([
@@ -541,7 +584,7 @@ class ManagementController extends Controller
 
     public function review(Request $request, Registration $registration)
     {
-        abort_unless($this->scopeCompetitions($request)->whereKey($registration->competition_id)->exists(),403);
+        $this->authorizeRegistration($request, $registration);
         $data=$request->validate(['status'=>'required|in:approved,rejected,revision','review_note'=>'nullable|string|max:1000']);
         if(in_array($data['status'],['rejected','revision']) && empty($data['review_note'])) return response()->json(['message'=>'Catatan wajib diisi untuk penolakan atau revisi.'],422);
         if($data['status']==='approved' && (!$registration->team_completed_at || !$registration->documents_completed_at)) return response()->json(['message'=>'Data peserta dan seluruh dokumen wajib dilengkapi sebelum pendaftaran dapat diterima.'],422);
@@ -551,7 +594,7 @@ class ManagementController extends Controller
 
     public function verifyPayment(Request $request, Registration $registration)
     {
-        abort_unless($this->scopeCompetitions($request)->whereKey($registration->competition_id)->exists(), 403);
+        $this->authorizeRegistration($request, $registration);
         $data = $request->validate(['is_valid'=>'required|boolean']);
         if ($data['is_valid'] && !$registration->payment_proof_path) {
             return response()->json(['message'=>'Peserta belum mengunggah bukti pembayaran.'], 422);
@@ -566,7 +609,7 @@ class ManagementController extends Controller
 
     public function verifyMemberNisn(Request $request, RegistrationMember $registrationMember)
     {
-        abort_unless($this->scopeCompetitions($request)->whereKey($registrationMember->competition_id)->exists(), 403);
+        $this->authorizeRegistration($request, $registrationMember->registration);
         $data = $request->validate(['is_valid' => 'required|boolean']);
         $registrationMember->update($data['is_valid'] ? [
             'nisn_verified_at' => now(),
@@ -581,8 +624,16 @@ class ManagementController extends Controller
 
     public function export(Request $request, RegistrationExcelExporter $exporter)
     {
-        $ids=$this->scopeCompetitions($request)->pluck('id');
-        $rows=Registration::with(['competition:id,title,category,participation_type,team_size,location','competitionSession','officials'])->whereIn('competition_id',$ids)->where('status','approved')->get();
+        $request->validate([
+            'competition_id'=>'nullable|integer|exists:competitions,id',
+            'session_id'=>'nullable|integer|exists:competition_sessions,id',
+        ]);
+        $rows=$this->scopeRegistrations($request)
+            ->with(['competition:id,title,category,participation_type,team_size,location','competitionSession','officials'])
+            ->where('status','approved')
+            ->when($request->filled('competition_id'), fn ($query) => $query->where('competition_id', $request->integer('competition_id')))
+            ->when($request->filled('session_id'), fn ($query) => $query->where('competition_session_id', $request->integer('session_id')))
+            ->get();
         $path=$exporter->create($rows);
         return response()->download($path,'pendaftar-tervalidasi.xlsx',['Content-Type'=>'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'])->deleteFileAfterSend(true);
     }

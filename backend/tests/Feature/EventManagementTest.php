@@ -1766,11 +1766,13 @@ class EventManagementTest extends TestCase
 
         $this->withToken('pic-multi-lokasi-token')->postJson('/api/manage/notifications', [
             'competition_id'=>$firstCompetition->id,
+            'competition_session_id'=>$firstCompetition->sessions()->where('venue_id', $venues[0]->id)->value('id'),
             'title'=>'Informasi Olimpiade',
-            'message'=>'Informasi untuk seluruh lokasi olimpiade.',
+            'message'=>'Informasi untuk lokasi Olimpiade yang dipilih.',
         ])->assertCreated();
         $this->withToken('spv-multi-lokasi-token')->postJson('/api/manage/notifications', [
             'competition_id'=>$secondCompetition->id,
+            'competition_session_id'=>$secondCompetition->sessions()->where('venue_id', $venues[0]->id)->value('id'),
             'title'=>'Informasi Karya Ilmiah',
             'message'=>'Informasi untuk lokasi karya ilmiah.',
         ])->assertCreated();
