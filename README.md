@@ -25,10 +25,6 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 Database default: `bsiflash`, user MySQL `root`, tanpa password. Sesuaikan `backend/.env` bila konfigurasi lokal berbeda.
 
-## Akun demo
-
-- Super Admin: `admin@bsiflash2027.id` / `password123`
-- PIC: `pic@bsiflash2027.id` / `password123`
 
 ## Fitur utama
 
