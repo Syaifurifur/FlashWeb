@@ -536,10 +536,13 @@ export function TournamentPublic() {
               {formatLabels[data.draw.format]} · {dateTime(data.draw.locked_at)} · Operator {data.draw.operator?.name}
             </p>
           </div>
-          <button className="btn-ghost" onClick={() => window.print()}>
+          {['single_elimination', 'groups_knockout'].includes(data.draw.format) ? <Link className="btn-ghost" target="_blank" to={`/lomba/${slug}/bagan/cetak${data.session?.id ? `?session_id=${data.session.id}` : ''}`}>
             <Printer size={16} />
             Cetak Bagan
-          </button>
+          </Link> : <button className="btn-ghost" onClick={() => window.print()}>
+            <Printer size={16} />
+            Cetak Bagan
+          </button>}
         </div>
         {sessionPicker}
         <GroupStandings groups={data.draw.group_standings} />

@@ -4,6 +4,7 @@
 
 # Local service logs
 mysql*.log
+.runtime/
 
 # Database dumps and backups may contain participant data
 *.sql

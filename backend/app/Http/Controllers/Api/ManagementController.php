@@ -487,7 +487,7 @@ class ManagementController extends Controller
             'page'=>'nullable|integer|min:1',
             'per_page'=>'nullable|integer|in:10,20,50,100',
         ]);
-        $q=$this->scopeRegistrations($request)->with('competition:id,title,category', 'competitionSession');
+        $q=$this->scopeRegistrations($request)->with('competition:id,title,category,participation_type', 'competitionSession');
         if($request->filled('status')&&$request->status!=='all')$q->where('status',$request->status);
         if($request->filled('competition_id'))$q->where('competition_id',$request->integer('competition_id'));
         if($request->filled('session_id')) {
