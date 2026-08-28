@@ -1545,16 +1545,26 @@ class EventManagementTest extends TestCase
             'competition_start_date'=>now()->addDays(10),'competition_end_date'=>now()->addDays(11),
             'is_active'=>true,
         ]);
+        CompetitionSession::create([
+            'competition_id'=>$competition->id,'venue_id'=>$venue->id,'city'=>'Kota Bogor','venue'=>$venue->name,
+            'activity_start_date'=>now()->addDays(12),'activity_end_date'=>now()->addDays(13),
+            'competition_start_date'=>now()->addDays(12),'competition_end_date'=>now()->addDays(13),
+            'is_active'=>false,
+        ]);
 
         $this->withToken('admin-venue-token')->deleteJson('/api/manage/venues/'.$venue->id)
             ->assertUnprocessable()
             ->assertJsonPath('message', 'Tempat masih digunakan pada sesi lomba. Nonaktifkan tempat atau pindahkan sesi terlebih dahulu.');
 
         $this->withToken('admin-venue-token')->getJson('/api/manage/venues')
-            ->assertOk()->assertJsonPath('0.sessions_count', 1);
+            ->assertOk()
+            ->assertJsonPath('0.sessions_count', 2)
+            ->assertJsonPath('0.active_sessions_count', 1)
+            ->assertJsonPath('0.inactive_sessions_count', 1);
         $this->getJson('/api/venues')->assertOk()->assertJsonPath('0.city', 'Kota Bogor');
         $this->getJson('/api/venues/'.$venue->fresh()->slug)
             ->assertOk()
+            ->assertJsonCount(1, 'sessions')
             ->assertJsonPath('pic.name', 'PIC Kota')
             ->assertJsonPath('supervisor.name', 'SPV Kota');
     }

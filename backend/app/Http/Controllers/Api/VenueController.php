@@ -14,7 +14,16 @@ class VenueController extends Controller
 {
     public function index(Request $request)
     {
-        $query = CompetitionVenue::query()->where('event_edition_id', EventEdition::resolveCurrent()->id)->with(['pic:id,name,whatsapp','supervisor:id,name,whatsapp'])->withCount('sessions')->orderBy('city')->orderBy('name');
+        $query = CompetitionVenue::query()
+            ->where('event_edition_id', EventEdition::resolveCurrent()->id)
+            ->with(['pic:id,name,whatsapp','supervisor:id,name,whatsapp'])
+            ->withCount([
+                'sessions',
+                'sessions as active_sessions_count'=>fn ($sessions) => $sessions->where('is_active', true),
+                'sessions as inactive_sessions_count'=>fn ($sessions) => $sessions->where('is_active', false),
+            ])
+            ->orderBy('city')
+            ->orderBy('name');
 
         if ($request->boolean('with_assignments')) {
             $query->with(['sessions'=>fn ($sessions) => $sessions
