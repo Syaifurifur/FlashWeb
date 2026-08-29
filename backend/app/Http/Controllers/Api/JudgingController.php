@@ -216,12 +216,12 @@ class JudgingController extends Controller
             $ranked = $this->assignmentsQuery($competition, $session)->where('status', 'final')
                 ->with('scores')->get()->groupBy('registration_id')
                 ->map(fn ($items, $registrationId) => ['registration_id'=>(int) $registrationId,'score'=>round($items->avg(fn ($assignment) => $assignment->scores->sum('score')), 2)])
-                ->sortByDesc('score')->values()->take(3);
+                ->sortByDesc('score')->values()->take(4);
             CompetitionResult::where('competition_id', $competition->id)->where('competition_session_id', $session?->id)->where('source', 'judging')->delete();
             $ranked->each(fn ($result, $index) => CompetitionResult::create([
                 'competition_id'=>$competition->id, 'competition_session_id'=>$session?->id,
                 'registration_id'=>$result['registration_id'], 'rank'=>$index + 1,
-                'title'=>'Juara '.($index + 1), 'source'=>'judging', 'score'=>$result['score'], 'announced_at'=>now(),
+                'title'=>$index === 3 ? 'Juara Harapan' : 'Juara '.($index + 1), 'source'=>'judging', 'score'=>$result['score'], 'announced_at'=>now(),
             ]));
         });
         return $session?->fresh() ?? $competition->fresh();

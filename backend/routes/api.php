@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\ScheduleController;
 use App\Http\Controllers\Api\VenueController;
 use App\Http\Controllers\Api\CompetitionTypeController;
 use App\Http\Controllers\Api\EventEditionController;
+use App\Http\Controllers\Api\ScholarshipLoaController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/competitions', [PublicController::class, 'competitions']);
@@ -116,6 +117,16 @@ Route::middleware('api.auth')->group(function () {
         Route::post('/manage/schedules/competitions/{competition}/blocks', [ScheduleController::class, 'storeBlock']);
         Route::put('/manage/schedules/blocks/{block}', [ScheduleController::class, 'updateBlock']);
         Route::delete('/manage/schedules/blocks/{block}', [ScheduleController::class, 'destroyBlock']);
+    });
+
+    Route::middleware('permission:scholarships.manage')->prefix('manage/scholarship-loas')->group(function () {
+        Route::get('/', [ScholarshipLoaController::class, 'index']);
+        Route::post('/templates', [ScholarshipLoaController::class, 'storeTemplate']);
+        Route::post('/templates/{template}', [ScholarshipLoaController::class, 'updateTemplate']);
+        Route::delete('/templates/{template}', [ScholarshipLoaController::class, 'destroyTemplate']);
+        Route::post('/winners', [ScholarshipLoaController::class, 'setWinner']);
+        Route::post('/generate', [ScholarshipLoaController::class, 'generate']);
+        Route::get('/issuances/{issuance}', [ScholarshipLoaController::class, 'showIssuance']);
     });
 
     Route::middleware('permission:competitions.manage')->group(function () {

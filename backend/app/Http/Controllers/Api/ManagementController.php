@@ -587,9 +587,15 @@ class ManagementController extends Controller
         $this->authorizeRegistration($request, $registration);
         $data=$request->validate(['status'=>'required|in:approved,rejected,revision','review_note'=>'nullable|string|max:1000']);
         if(in_array($data['status'],['rejected','revision']) && empty($data['review_note'])) return response()->json(['message'=>'Catatan wajib diisi untuk penolakan atau revisi.'],422);
-        if($data['status']==='approved' && (!$registration->team_completed_at || !$registration->documents_completed_at)) return response()->json(['message'=>'Data peserta dan seluruh dokumen wajib dilengkapi sebelum pendaftaran dapat diterima.'],422);
-        if($data['status']==='approved' && (float) $registration->competition->fee > 0 && !$registration->payment_verified_at) return response()->json(['message'=>'Bukti pembayaran harus diperiksa dan ditandai valid sebelum peserta diterima.'],422);
-        $registration->update($data+['reviewed_by'=>$request->user()->id,'reviewed_at'=>now()]); return $registration;
+        $warnings = [];
+        if ($data['status'] === 'approved') {
+            if (! $registration->team_completed_at) $warnings[] = 'Data peserta/tim belum lengkap.';
+            if (! $registration->documents_completed_at) $warnings[] = 'Dokumen pendaftaran belum lengkap.';
+            if ((float) $registration->competition->fee > 0 && ! $registration->payment_verified_at) $warnings[] = 'Pembayaran belum ditandai valid.';
+        }
+        $registration->update($data+['reviewed_by'=>$request->user()->id,'reviewed_at'=>now()]);
+        $registration->setAttribute('approval_warnings', $warnings);
+        return $registration;
     }
 
     public function verifyPayment(Request $request, Registration $registration)

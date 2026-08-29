@@ -13,7 +13,7 @@ function PhotoPlaceholder({label}) {
 
 export function TeamRosterPrint() {
   const {id}=useParams(),navigate=useNavigate()
-  const [registration,setRegistration]=useState(null),[error,setError]=useState('')
+  const [registration,setRegistration]=useState(null),[error,setError]=useState(''),[orientation,setOrientation]=useState('landscape')
   useEffect(()=>{api(`/manage/registrations/${id}`).then(setRegistration).catch(requestError=>setError(requestError.message))},[id])
   const players=useMemo(()=>{
     if(!registration)return []
@@ -31,11 +31,15 @@ export function TeamRosterPrint() {
 
   const location=registration.competition_session
   const printedAt=new Intl.DateTimeFormat('id-ID',{dateStyle:'long',timeZone:'Asia/Jakarta'}).format(new Date())
-  return <main className="roster-print-page">
+  return <main className={`roster-print-page is-${orientation}`}>
+    <style>{`@media print{@page{size:A4 ${orientation};margin:0}}`}</style>
     <div className="roster-toolbar">
       <button type="button" onClick={()=>window.close()}><ArrowLeft/>Tutup</button>
-      <div><b>Pratinjau roster tim</b><span>Gunakan ukuran A4 dan orientasi landscape.</span></div>
-      <button type="button" className="primary" onClick={()=>window.print()}><Printer/>Cetak / Simpan PDF</button>
+      <div className="roster-toolbar-copy"><b>Pratinjau roster tim</b><span>Pilih orientasi sebelum membuka dialog cetak.</span></div>
+      <div className="roster-toolbar-actions">
+        <div className="roster-orientation" role="group" aria-label="Orientasi cetak"><button type="button" className={orientation==='portrait'?'selected':''} onClick={()=>setOrientation('portrait')}>Potret</button><button type="button" className={orientation==='landscape'?'selected':''} onClick={()=>setOrientation('landscape')}>Lanskap</button></div>
+        <button type="button" className="primary" onClick={()=>window.print()}><Printer/>Cetak / Simpan PDF</button>
+      </div>
     </div>
     <article className="roster-sheet">
       <header className="roster-header">

@@ -23,6 +23,7 @@ class AccessRole extends Model
         'judging.manage' => 'Mengelola verifikasi dan proses penilaian',
         'judging.score' => 'Menilai karya yang ditugaskan',
         'tournaments.manage' => 'Mengelola drawing dan bagan pertandingan',
+        'scholarships.manage' => 'Mengelola pemenang dan LOA beasiswa',
         'accounts.manage' => 'Mengelola akun pengguna',
         'roles.manage' => 'Membuat dan mengubah role',
         'content.manage' => 'Mengubah konten halaman website',

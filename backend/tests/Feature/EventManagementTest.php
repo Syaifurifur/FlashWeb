@@ -476,11 +476,25 @@ class EventManagementTest extends TestCase
             $this->assertTrue($standing['completed']);
             $this->assertCount(2,collect($standing['rows'])->where('qualified',true));
         }
+        foreach([1,2,3] as $round){
+            $matches=TournamentMatch::where('tournament_draw_id',$groupDrawId)->where('stage','knockout')->where('round_number',$round)->get();
+            foreach($matches as $match)$this->withToken('admin-tournament-token')->putJson('/api/manage/tournaments/matches/'.$match->id,[
+                'score_a'=>3,'score_b'=>1,'status'=>'completed','venue'=>'Lapangan Knockout',
+            ])->assertOk();
+        }
+        $thirdPlace=TournamentMatch::where('tournament_draw_id',$groupDrawId)->where('stage','third_place')->firstOrFail();
+        $this->withToken('admin-tournament-token')->putJson('/api/manage/tournaments/matches/'.$thirdPlace->id,[
+            'score_a'=>2,'score_b'=>1,'status'=>'completed','venue'=>'Lapangan Knockout',
+        ])->assertOk();
+        $this->assertDatabaseHas('competition_results',['competition_id'=>$competition->id,'rank'=>1,'title'=>'Juara 1']);
+        $this->assertDatabaseHas('competition_results',['competition_id'=>$competition->id,'rank'=>2,'title'=>'Juara 2']);
+        $this->assertDatabaseHas('competition_results',['competition_id'=>$competition->id,'rank'=>3,'title'=>'Juara 3']);
+        $this->assertDatabaseHas('competition_results',['competition_id'=>$competition->id,'rank'=>4,'title'=>'Juara Harapan']);
         $this->getJson('/api/competitions/'.$competition->slug.'/tournament')
             ->assertOk()->assertJsonCount(2,'draw.group_standings');
     }
 
-    public function test_team_drawing_only_uses_complete_and_reviewed_teams(): void
+    public function test_team_drawing_trusts_approved_verifier_decision_even_when_team_is_incomplete(): void
     {
         $competition=$this->competition();
         $competition->update(['participation_type'=>'team','team_size'=>2]);
@@ -508,16 +522,17 @@ class EventManagementTest extends TestCase
         }
 
         $this->withToken('pic-validasi-drawing-token')->getJson('/api/manage/tournaments?competition_id='.$competition->id)
-            ->assertOk()->assertJsonCount(2,'participants')
-            ->assertJsonCount(3,'force_majeure_candidates')
-            ->assertJsonPath('drawing_readiness.verified',2)
-            ->assertJsonPath('drawing_readiness.force_majeure_candidates',3)
+            ->assertOk()->assertJsonCount(3,'participants')
+            ->assertJsonCount(2,'force_majeure_candidates')
+            ->assertJsonPath('drawing_readiness.verified',3)
+            ->assertJsonPath('drawing_readiness.force_majeure_candidates',2)
             ->assertJsonPath('drawing_readiness.rejected',1)
-            ->assertJsonPath('participants.0.team_name','Tim Layak 1')
-            ->assertJsonPath('participants.1.team_name','Tim Layak 2');
+            ->assertJsonPath('participants.0.team_name','Tim Belum Lengkap')
+            ->assertJsonPath('participants.1.team_name','Tim Layak 1')
+            ->assertJsonPath('participants.2.team_name','Tim Layak 2');
         $this->withToken('pic-validasi-drawing-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
             'mode'=>'random','format'=>'single_elimination',
-        ])->assertCreated()->assertJsonCount(2,'entries');
+        ])->assertCreated()->assertJsonCount(4,'entries');
 
         $pending=Registration::where('team_name','Tim Belum Divalidasi')->firstOrFail();
         $this->withToken('pic-validasi-drawing-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
@@ -793,6 +808,44 @@ class EventManagementTest extends TestCase
         $this->assertSame('Petugas Data',$staff->fresh()->role_name);
     }
 
+    public function test_verifier_can_approve_incomplete_registration_based_on_manual_review(): void
+    {
+        $competition = $this->competition();
+        $competition->update(['participation_type'=>'team', 'team_size'=>5, 'official_count'=>2, 'fee'=>250000]);
+        $role = AccessRole::create([
+            'name'=>'Verifikator Pendaftaran', 'slug'=>'verifikator-pendaftaran',
+            'permissions'=>['dashboard.view','registrations.view','registrations.review'],
+        ]);
+        $verifier = User::create([
+            'name'=>'Petugas Verifikasi', 'email'=>'verifikator-manual@test.id', 'password'=>'password123',
+            'role'=>$role->slug, 'competition_id'=>$competition->id,
+            'api_token'=>hash('sha256', 'verifikator-manual-token'),
+        ]);
+        $registration = Registration::create([
+            'competition_id'=>$competition->id, 'ticket_code'=>'INCOMPLETE-TEAM-01',
+            'full_name'=>'Koordinator Tim Parsial', 'team_name'=>'Tim Parsial',
+            'email'=>'tim-parsial@test.id', 'whatsapp'=>'081234567890',
+            'school_name'=>'SMA Parsial', 'status'=>'pending', 'consent'=>true,
+            'team_completed_at'=>null, 'documents_completed_at'=>null, 'payment_verified_at'=>null,
+        ]);
+        RegistrationMember::create([
+            'registration_id'=>$registration->id, 'competition_id'=>$competition->id,
+            'member_order'=>1, 'full_name'=>'Satu Pemain Tersimpan',
+        ]);
+
+        $this->withToken('verifikator-manual-token')->patchJson('/api/manage/registrations/'.$registration->id.'/review', [
+            'status'=>'approved', 'review_note'=>'Data fisik telah diperiksa langsung oleh petugas.',
+        ])->assertOk()
+            ->assertJsonPath('status', 'approved')
+            ->assertJsonPath('reviewed_by', $verifier->id)
+            ->assertJsonCount(3, 'approval_warnings');
+
+        $this->assertDatabaseHas('registrations', [
+            'id'=>$registration->id, 'status'=>'approved', 'reviewed_by'=>$verifier->id,
+            'team_completed_at'=>null, 'documents_completed_at'=>null, 'payment_verified_at'=>null,
+        ]);
+    }
+
     public function test_registration_list_can_be_filtered_by_competition_name(): void
     {
         $competition=$this->competition();
@@ -943,7 +996,8 @@ class EventManagementTest extends TestCase
         $registration=Registration::firstOrFail();
         $this->withToken('pic-official-token')->patchJson('/api/manage/registrations/'.$registration->id.'/review',[
             'status'=>'approved','review_note'=>null,
-        ])->assertUnprocessable()->assertJsonPath('message','Bukti pembayaran harus diperiksa dan ditandai valid sebelum peserta diterima.');
+        ])->assertOk()->assertJsonPath('status','approved')
+            ->assertJsonPath('approval_warnings.0','Pembayaran belum ditandai valid.');
         $this->withToken('pic-official-token')->patchJson('/api/manage/registrations/'.$registration->id.'/payment-verification',[
             'is_valid'=>true,
         ])->assertOk()->assertJsonPath('payment_verified_by',$pic->id);

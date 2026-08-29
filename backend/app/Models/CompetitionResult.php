@@ -16,4 +16,5 @@ class CompetitionResult extends Model
     public function competition() { return $this->belongsTo(Competition::class); }
     public function competitionSession() { return $this->belongsTo(CompetitionSession::class); }
     public function registration() { return $this->belongsTo(Registration::class); }
+    public function scholarshipLoaIssuances() { return $this->hasMany(ScholarshipLoaIssuance::class); }
 }

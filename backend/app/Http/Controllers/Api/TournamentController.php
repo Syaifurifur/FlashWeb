@@ -87,10 +87,8 @@ class TournamentController extends Controller
             ->when($session, fn ($query) => $query->where('competition_session_id', $session->id))
             ->where('status', 'approved')
             ->when($competition->participation_type === 'team', fn ($query) => $query
-                ->whereNotNull('team_completed_at')
                 ->whereNotNull('reviewed_by')
-                ->whereNotNull('reviewed_at')
-                ->has('members', '=', $competition->team_size));
+                ->whereNotNull('reviewed_at'));
     }
 
     private function forceMajeureCandidates(Competition $competition, ?CompetitionSession $session = null): Collection
@@ -438,6 +436,17 @@ class TournamentController extends Controller
             if ($loserId) CompetitionResult::updateOrCreate(
                 ['competition_id'=>$match->tournamentDraw->competition_id, 'competition_session_id'=>$match->tournamentDraw->competition_session_id, 'rank'=>2, 'source'=>'tournament'],
                 ['registration_id'=>$loserId, 'title'=>'Juara 2', 'announced_at'=>now()]
+            );
+        }
+        if ($match->status === 'completed' && $match->winner_id && $match->stage === 'third_place') {
+            $loserId = $match->winner_id === $match->participant_a_id ? $match->participant_b_id : $match->participant_a_id;
+            CompetitionResult::updateOrCreate(
+                ['competition_id'=>$match->tournamentDraw->competition_id, 'competition_session_id'=>$match->tournamentDraw->competition_session_id, 'rank'=>3, 'source'=>'tournament'],
+                ['registration_id'=>$match->winner_id, 'title'=>'Juara 3', 'announced_at'=>now()]
+            );
+            if ($loserId) CompetitionResult::updateOrCreate(
+                ['competition_id'=>$match->tournamentDraw->competition_id, 'competition_session_id'=>$match->tournamentDraw->competition_session_id, 'rank'=>4, 'source'=>'tournament'],
+                ['registration_id'=>$loserId, 'title'=>'Juara Harapan', 'announced_at'=>now()]
             );
         }
         return $this->drawPayload($match->tournamentDraw->fresh());

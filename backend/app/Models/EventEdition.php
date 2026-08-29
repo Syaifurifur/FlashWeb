@@ -22,6 +22,7 @@ class EventEdition extends Model
     public function venues() { return $this->hasMany(CompetitionVenue::class); }
     public function registrations() { return $this->hasMany(Registration::class); }
     public function siteContents() { return $this->hasMany(SiteContent::class); }
+    public function scholarshipLoaTemplates() { return $this->hasMany(ScholarshipLoaTemplate::class); }
 
     public static function resolveCurrent(bool $publicOnly = false): self
     {

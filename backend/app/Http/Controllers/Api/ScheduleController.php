@@ -326,6 +326,17 @@ class ScheduleController extends Controller
                 ['registration_id'=>$loserId, 'title'=>'Juara 2', 'announced_at'=>now()]
             );
         }
+        if (in_array($match->status, ['completed','walkover'], true) && $match->winner_id && $match->stage === 'third_place') {
+            $loserId = $match->winner_id === $match->participant_a_id ? $match->participant_b_id : $match->participant_a_id;
+            CompetitionResult::updateOrCreate(
+                ['competition_id'=>$competition->id, 'competition_session_id'=>$session?->id, 'rank'=>3, 'source'=>'tournament'],
+                ['registration_id'=>$match->winner_id, 'title'=>'Juara 3', 'announced_at'=>now()]
+            );
+            if ($loserId) CompetitionResult::updateOrCreate(
+                ['competition_id'=>$competition->id, 'competition_session_id'=>$session?->id, 'rank'=>4, 'source'=>'tournament'],
+                ['registration_id'=>$loserId, 'title'=>'Juara Harapan', 'announced_at'=>now()]
+            );
+        }
 
         if ($notify) $this->notifyParticipants($request, $competition, $match);
         return $this->payload($competition->fresh(),$session?->fresh(),$match->tournamentDraw->fresh());
