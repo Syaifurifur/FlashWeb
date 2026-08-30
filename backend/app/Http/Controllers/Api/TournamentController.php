@@ -128,10 +128,10 @@ class TournamentController extends Controller
             'operator:id,name','competition:id,title,slug,category',
             'competitionSession:id,competition_id,venue_id,city,venue,competition_start_date,competition_end_date,schedule_venues',
             'competitionSession.venueRecord:id,slug,city,name',
-            'entries.registration:id,full_name,team_name,school_name,status',
-            'matches.participantA:id,full_name,team_name,school_name,status',
-            'matches.participantB:id,full_name,team_name,school_name,status',
-            'matches.winner:id,full_name,team_name,school_name,status',
+            'entries.registration:id,full_name,team_name,school_name,school_logo_path,status',
+            'matches.participantA:id,full_name,team_name,school_name,school_logo_path,status',
+            'matches.participantB:id,full_name,team_name,school_name,school_logo_path,status',
+            'matches.winner:id,full_name,team_name,school_name,school_logo_path,status',
         ]);
 
         $draw->competition->setAttribute('scoring_mode', VolleyballScoring::mode($draw->competition));
@@ -145,9 +145,9 @@ class TournamentController extends Controller
         if (! in_array($draw->format, ['round_robin', 'round_robin_full', 'groups_knockout'], true)) return [];
 
         $draw->loadMissing([
-            'entries.registration:id,full_name,team_name,school_name,status',
-            'matches.participantA:id,full_name,team_name,school_name,status',
-            'matches.participantB:id,full_name,team_name,school_name,status',
+            'entries.registration:id,full_name,team_name,school_name,school_logo_path,status',
+            'matches.participantA:id,full_name,team_name,school_name,school_logo_path,status',
+            'matches.participantB:id,full_name,team_name,school_name,school_logo_path,status',
         ]);
         $matchesByGroup = $draw->matches->where('stage', 'group')->groupBy(fn ($match) => $match->group_name ?: $match->round_label);
 
@@ -158,7 +158,7 @@ class TournamentController extends Controller
                     $participant = $entry->registration;
                     $rows[$entry->registration_id] = [
                         'registration_id' => $entry->registration_id,
-                        'participant' => $participant?->only(['id', 'full_name', 'team_name', 'school_name']),
+                        'participant' => $participant?->only(['id', 'full_name', 'team_name', 'school_name', 'school_logo_path']),
                         'played' => 0, 'won' => 0, 'drawn' => 0, 'lost' => 0,
                         'goals_for' => 0, 'goals_against' => 0, 'goal_difference' => 0, 'points' => 0,
                     ];
@@ -221,7 +221,7 @@ class TournamentController extends Controller
         $competition=$this->competitions($request)->whereKey($scope['competition_id'])->firstOrFail();
         $session=$scope['session_id']?$this->accessibleSessions($request,$competition)->whereKey($scope['session_id'])->firstOrFail():null;
         $participants=$this->eligibleParticipants($competition,$session)
-            ->orderBy('full_name')->get(['id','ticket_code','full_name','team_name','school_name']);
+            ->orderBy('full_name')->get(['id','ticket_code','full_name','team_name','school_name','school_logo_path']);
         $forceMajeureCandidates=$this->forceMajeureCandidates($competition,$session);
         $draw=$competition->tournamentDraws()->where('competition_session_id',$session?->id)->latest('version')->first();
         return ['scopes'=>$scopes,'competitions'=>$options,'competition'=>[...$competition->only(['id','title','slug','category']),'scoring_mode'=>VolleyballScoring::mode($competition)],

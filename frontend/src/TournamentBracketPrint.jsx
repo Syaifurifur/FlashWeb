@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, Printer } from 'lucide-react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { api } from './api'
+import { api, STORAGE } from './api'
 import './tournament-bracket-print.css'
 
 const nameOf = participant => participant?.team_name || participant?.full_name || ''
 const scoreOf = score => score === null || score === undefined ? '' : score
+const logoOf = participant => participant?.school_logo_path ? `${STORAGE}/${participant.school_logo_path}` : null
+
+function PrintTeam({participant, name, align = 'left'}) {
+  const logo = logoOf(participant)
+  return <span className={`print-bracket-team ${align === 'right' ? 'right' : ''}`} title={name}>
+    {logo && <img src={logo} alt="" onError={event => { event.currentTarget.style.display = 'none' }}/>}<em>{name}</em>
+  </span>
+}
 
 function printableRounds(draw) {
   if (!draw?.matches) return []
@@ -32,10 +40,10 @@ function BracketMatch({match, roundIndex, style, matchesById}) {
   return <article className="print-bracket-match" style={style}>
     <div className="print-bracket-match-label">{match.round_label} · Game {match.match_number}</div>
     <div className={match.winner_id && match.winner_id === match.participant_a_id ? 'winner' : ''}>
-      <span title={firstName}>{firstName}</span><b>{scoreOf(match.score_a)}</b>
+      <PrintTeam participant={match.participant_a} name={firstName}/><b>{scoreOf(match.score_a)}</b>
     </div>
     <div className={match.winner_id && match.winner_id === match.participant_b_id ? 'winner' : ''}>
-      <span title={secondName}>{secondName}</span><b>{scoreOf(match.score_b)}</b>
+      <PrintTeam participant={match.participant_b} name={secondName}/><b>{scoreOf(match.score_b)}</b>
     </div>
   </article>
 }
@@ -65,10 +73,10 @@ function GroupStageSheets({data, printedAt}) {
         return <article className="bracket-group-card" key={group.name}>
           <div className="bracket-group-title"><h2>{group.name}</h2><span>{group.completed ? 'SELESAI' : `${group.played_matches}/${group.total_matches} LAGA`}</span></div>
           <table><thead><tr><th>#</th><th>Tim</th><th>M</th><th>Mn</th><th>S</th><th>K</th><th>SG</th><th>P</th></tr></thead>
-            <tbody>{group.rows.map(row => <tr key={row.registration_id} className={row.qualified ? 'qualified' : ''}><td>{row.position}</td><td><b>{nameOf(row.participant)}</b>{row.qualified && <small>LOLOS</small>}</td><td>{row.played}</td><td>{row.won}</td><td>{row.drawn}</td><td>{row.lost}</td><td>{row.goal_difference}</td><td><strong>{row.points}</strong></td></tr>)}</tbody>
+            <tbody>{group.rows.map(row => <tr key={row.registration_id} className={row.qualified ? 'qualified' : ''}><td>{row.position}</td><td><PrintTeam participant={row.participant} name={nameOf(row.participant)}/>{row.qualified && <small>LOLOS</small>}</td><td>{row.played}</td><td>{row.won}</td><td>{row.drawn}</td><td>{row.lost}</td><td>{row.goal_difference}</td><td><strong>{row.points}</strong></td></tr>)}</tbody>
           </table>
           <div className="bracket-group-matches"><h3>Pertandingan Grup</h3>{matches.map(match => <div key={match.id}>
-            <span>{nameOf(match.participant_a) || 'Menunggu tim'}</span><b>{match.score_a ?? '–'}</b><i>vs</i><b>{match.score_b ?? '–'}</b><span>{nameOf(match.participant_b) || 'Menunggu tim'}</span>
+            <PrintTeam participant={match.participant_a} name={nameOf(match.participant_a) || 'Menunggu tim'}/><b>{match.score_a ?? '–'}</b><i>vs</i><b>{match.score_b ?? '–'}</b><PrintTeam participant={match.participant_b} name={nameOf(match.participant_b) || 'Menunggu tim'} align="right"/>
           </div>)}</div>
         </article>
       })}

@@ -1,9 +1,22 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Download, GripVertical, LockKeyhole, Play, Printer, ShieldCheck, Trophy } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
-import { api } from './api'
+import { api, STORAGE } from './api'
 
 const nameOf = (participant) => participant?.team_name || participant?.full_name || 'BYE'
+const initialsOf = participant => nameOf(participant).split(/\s+/).slice(0, 2).map(word => word[0]).join('').toUpperCase()
+
+function PublicParticipant({participant, winner = false}) {
+  const [logoFailed, setLogoFailed] = useState(false)
+  useEffect(() => setLogoFailed(false), [participant?.school_logo_path])
+  const logo = participant?.school_logo_path && !logoFailed ? `${STORAGE}/${participant.school_logo_path}` : null
+  return <div className="flex min-w-0 items-center gap-3">
+    <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50 text-[10px] font-black text-slate-400">
+      {logo ? <img src={logo} alt={`Logo ${nameOf(participant)}`} className="size-full object-contain p-1" onError={() => setLogoFailed(true)}/> : initialsOf(participant)}
+    </span>
+    <span className="min-w-0"><b className={`block truncate ${winner ? 'text-emerald-700' : ''}`}>{nameOf(participant)}</b><small className="block truncate text-xs font-normal text-slate-400">{participant?.school_name}</small></span>
+  </div>
+}
 const jakartaDate = (value) =>
   value
     ? new Intl.DateTimeFormat('en-CA', {
@@ -471,15 +484,9 @@ function PublicMatch({ match }) {
         MATCH {String(match.match_number).padStart(2, '0')} — {match.round_label}
       </div>
       <div className="mt-4 grid grid-cols-[1fr_auto] gap-2">
-        <div>
-          <b>{nameOf(match.participant_a)}</b>
-          <p className="text-xs text-slate-400">{match.participant_a?.school_name}</p>
-        </div>
+        <PublicParticipant participant={match.participant_a} winner={match.winner_id === match.participant_a_id}/>
         <b>{match.score_a ?? '-'}</b>
-        <div>
-          <b>{nameOf(match.participant_b)}</b>
-          <p className="text-xs text-slate-400">{match.participant_b?.school_name}</p>
-        </div>
+        <PublicParticipant participant={match.participant_b} winner={match.winner_id === match.participant_b_id}/>
         <b>{match.score_b ?? '-'}</b>
       </div>
       {match.best_of_sets&&match.set_scores?.some(set=>set.score_a!==null||set.score_b!==null)&&<div className="mt-3 flex flex-wrap gap-2 border-t pt-3 text-[10px] font-bold text-slate-500">{match.set_scores.map((set,index)=>(set.score_a!==null||set.score_b!==null)&&<span key={index} className="rounded-lg bg-slate-100 px-2 py-1">Set {index+1}: {set.score_a??'–'}–{set.score_b??'–'}{set.completed?' ✓':''}</span>)}</div>}

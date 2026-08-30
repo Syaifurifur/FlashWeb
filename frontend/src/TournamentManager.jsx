@@ -1,11 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, ChevronDown, ChevronUp, Download, GripVertical, LockKeyhole, Play, Printer, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { api } from './api'
+import { api, STORAGE } from './api'
 import { VolleyballScoreEditor } from './VolleyballScore'
 import { normalizeVolleyballSets, volleyballSummary } from './volleyball-score-utils'
 
 const nameOf = participant => participant?.team_name || participant?.full_name || 'BYE'
+const initialsOf = participant => nameOf(participant).split(/\s+/).slice(0, 2).map(word => word[0]).join('').toUpperCase()
+
+function ParticipantIdentity({participant, winner = false, showSchool = false}) {
+  const [logoFailed, setLogoFailed] = useState(false)
+  useEffect(() => setLogoFailed(false), [participant?.school_logo_path])
+  const logo = participant?.school_logo_path && !logoFailed ? `${STORAGE}/${participant.school_logo_path}` : null
+  return <div className="flex min-w-0 items-center gap-2">
+    <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50 text-[10px] font-black text-slate-400">
+      {logo ? <img src={logo} alt={`Logo ${nameOf(participant)}`} className="size-full object-contain p-1" onError={() => setLogoFailed(true)}/> : initialsOf(participant)}
+    </span>
+    <span className="min-w-0"><b className={`block truncate text-sm ${winner ? 'font-black text-emerald-700' : 'font-bold'}`}>{nameOf(participant)}</b>{showSchool && participant?.school_name && <small className="block truncate text-xs font-normal text-slate-500">{participant.school_name}</small>}</span>
+  </div>
+}
 const dateTime = value => value ? new Intl.DateTimeFormat('id-ID', {dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Jakarta'}).format(new Date(value))+' WIB' : 'Belum dijadwalkan'
 const matchStatusLabels = {unscheduled:'Belum dimulai', upcoming:'Akan datang', check_in:'Check-in', ongoing:'Sedang berlangsung', delayed:'Tertunda', completed:'Selesai', walkover:'Walkover', cancelled:'Dibatalkan', bye:'Bye'}
 const formatLabels = {
@@ -83,9 +96,10 @@ function MatchEditor({match, reload, drawingLocked, volleyball = false}) {
   return <article className="rounded-2xl border bg-white p-4">
     <div className="flex flex-wrap items-center justify-between gap-2"><b className="text-xs text-blue-600">MATCH {String(match.match_number).padStart(2, '0')} · {match.round_label}</b><span className={`rounded-full px-2 py-1 text-[11px] font-bold ${match.status === 'ongoing' ? 'bg-emerald-100 text-emerald-700' : match.status === 'completed' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'}`}>{matchStatusLabels[match.status] || match.status}</span></div>
     {!volleyball && <div className="mt-3 grid grid-cols-[minmax(0,1fr)_70px] items-center gap-2 text-sm">
-      <span className={match.winner_id === match.participant_a_id ? 'font-black text-emerald-700' : 'font-bold'}>{nameOf(match.participant_a)}</span><input aria-label={`Skor ${nameOf(match.participant_a)}`} className="input py-2 text-center" type="number" min="0" value={scoreA} onChange={event => setScoreA(event.target.value)} disabled={!canOperate || !['ongoing','completed'].includes(match.status)}/>
-      <span className={match.winner_id === match.participant_b_id ? 'font-black text-emerald-700' : 'font-bold'}>{nameOf(match.participant_b)}</span><input aria-label={`Skor ${nameOf(match.participant_b)}`} className="input py-2 text-center" type="number" min="0" value={scoreB} onChange={event => setScoreB(event.target.value)} disabled={!canOperate || !['ongoing','completed'].includes(match.status)}/>
+      <ParticipantIdentity participant={match.participant_a} winner={match.winner_id === match.participant_a_id}/><input aria-label={`Skor ${nameOf(match.participant_a)}`} className="input py-2 text-center" type="number" min="0" value={scoreA} onChange={event => setScoreA(event.target.value)} disabled={!canOperate || !['ongoing','completed'].includes(match.status)}/>
+      <ParticipantIdentity participant={match.participant_b} winner={match.winner_id === match.participant_b_id}/><input aria-label={`Skor ${nameOf(match.participant_b)}`} className="input py-2 text-center" type="number" min="0" value={scoreB} onChange={event => setScoreB(event.target.value)} disabled={!canOperate || !['ongoing','completed'].includes(match.status)}/>
     </div>}
+    {volleyball && participantsReady && <div className="mt-3 grid gap-2 rounded-xl border bg-slate-50 p-3 sm:grid-cols-2"><ParticipantIdentity participant={match.participant_a} winner={match.winner_id === match.participant_a_id} showSchool/><ParticipantIdentity participant={match.participant_b} winner={match.winner_id === match.participant_b_id} showSchool/></div>}
     {volleyball && participantsReady && <VolleyballScoreEditor bestOf={bestOf} onBestOfChange={setBestOf} scores={setScores} onScoresChange={setSetScores} participantA={nameOf(match.participant_a)} participantB={nameOf(match.participant_b)} chooseFormat={!['ongoing','completed'].includes(match.status)} disabled={!canOperate} scoresDisabled={!['ongoing','completed'].includes(match.status)}/>}
     {!drawingLocked && <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs font-bold text-amber-800">Kunci drawing terlebih dahulu untuk menjalankan pertandingan.</p>}
     {drawingLocked && !participantsReady && <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs font-bold text-slate-500">Menunggu peserta dari pertandingan sebelumnya.</p>}

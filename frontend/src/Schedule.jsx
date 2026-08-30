@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CalendarDays, Check, Clock3, GripVertical, MapPin, Maximize2, Minimize2, Play, Plus, RefreshCw, Send, Sparkles, Trash2, Trophy, Tv } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
-import { api } from './api'
+import { api, STORAGE } from './api'
 import { VolleyballScoreEditor } from './VolleyballScore'
 import { normalizeVolleyballSets, volleyballSummary } from './volleyball-score-utils'
 
@@ -9,6 +9,22 @@ const TIME_ZONE = 'Asia/Jakarta'
 const labels = {unscheduled:'Belum dijadwalkan',upcoming:'Akan datang',check_in:'Check-in',ongoing:'Sedang berlangsung',delayed:'Tertunda',completed:'Selesai',walkover:'Walkover',cancelled:'Dibatalkan',bye:'Bye'}
 const colors = {unscheduled:'bg-slate-100 text-slate-600',upcoming:'bg-blue-50 text-blue-700',check_in:'bg-amber-50 text-amber-700',ongoing:'bg-emerald-50 text-emerald-700',delayed:'bg-orange-50 text-orange-700',completed:'bg-slate-800 text-white',walkover:'bg-violet-50 text-violet-700',cancelled:'bg-rose-50 text-rose-700',bye:'bg-slate-100 text-slate-500'}
 const nameOf = participant => participant?.team_name || participant?.full_name || 'Menunggu pemenang'
+const initialsOf = participant => participant ? nameOf(participant).split(/\s+/).slice(0, 2).map(word => word[0]).join('').toUpperCase() : '?'
+
+function TvTeamLogo({participant, compact = false}) {
+  const logo = participant?.school_logo_path ? `${STORAGE}/${participant.school_logo_path}` : null
+  return <span className={`relative grid shrink-0 place-items-center overflow-hidden border border-white/15 bg-white font-display font-black text-slate-500 shadow-lg ${compact ? 'size-9 rounded-lg text-[9px]' : 'size-14 rounded-2xl text-xs sm:size-16'}`}>
+    <span>{initialsOf(participant)}</span>
+    {logo&&<img src={logo} alt={`Logo ${nameOf(participant)}`} className="absolute inset-0 size-full bg-white object-contain p-1.5" onError={event => event.currentTarget.remove()}/>}
+  </span>
+}
+
+function TvTeam({participant, winner = false, align = 'left'}) {
+  return <div className={`flex min-w-0 items-center gap-3 ${align === 'right' ? 'flex-row-reverse text-right' : ''} ${winner ? 'text-white' : 'text-slate-300'}`}>
+    <TvTeamLogo participant={participant}/>
+    <div className="min-w-0"><div className="truncate font-display text-base font-bold sm:text-lg">{nameOf(participant)}</div>{winner&&<span className="text-[10px] font-black uppercase text-emerald-300">Pemenang</span>}</div>
+  </div>
+}
 const pad = value => String(value).padStart(2, '0')
 const dateKey = value => value ? new Intl.DateTimeFormat('en-CA', {timeZone:TIME_ZONE, year:'numeric', month:'2-digit', day:'2-digit'}).format(new Date(value)) : ''
 const timeValue = value => value ? new Intl.DateTimeFormat('en-GB', {timeZone:TIME_ZONE, hour:'2-digit', minute:'2-digit', hour12:false}).format(new Date(value)) : ''
@@ -161,18 +177,17 @@ export function ScheduleManager() {
 const tvScore = value => value === null || value === undefined ? '–' : Number(value) % 1 === 0 ? Number(value) : Number(value).toFixed(1)
 
 function TvScoreCard({match, live = false}) {
-  const participantA = nameOf(match.participant_a), participantB = nameOf(match.participant_b)
   const winnerA = Number(match.winner_id) === Number(match.participant_a_id)
   const winnerB = Number(match.winner_id) === Number(match.participant_b_id)
   return <article className={`overflow-hidden rounded-2xl border ${live ? 'border-emerald-400 bg-emerald-400/10' : 'border-white/10 bg-white/[.06]'}`}>
     <div className="flex items-center justify-between border-b border-white/10 px-4 py-2 text-[10px] font-black uppercase tracking-[.16em] text-cyan-300"><span>Match {pad(match.match_number)} · {match.round_label}</span><span>{labels[match.status]} · {match.venue || 'Venue belum ditentukan'}</span></div>
-    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 p-4"><div className={`min-w-0 text-right ${winnerA ? 'text-white' : 'text-slate-300'}`}><div className="truncate font-display text-base font-bold sm:text-lg">{participantA}</div>{winnerA&&<span className="text-[10px] font-black uppercase text-emerald-300">Pemenang</span>}</div>{match.status==='walkover'?<div className="min-w-32 rounded-xl bg-violet-500/20 px-4 py-4 text-center font-display text-2xl font-black text-violet-200">W.O.</div>:<div className="flex min-w-32 items-center justify-center gap-3 rounded-xl bg-black/30 px-4 py-3 font-display text-3xl font-black text-white sm:text-4xl"><span>{tvScore(match.score_a)}</span><span className="text-white/30">:</span><span>{tvScore(match.score_b)}</span></div>}<div className={`min-w-0 ${winnerB ? 'text-white' : 'text-slate-300'}`}><div className="truncate font-display text-base font-bold sm:text-lg">{participantB}</div>{winnerB&&<span className="text-[10px] font-black uppercase text-emerald-300">Pemenang</span>}</div></div>
+    <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 p-4"><TvTeam participant={match.participant_a} winner={winnerA} align="right"/>{match.status==='walkover'?<div className="min-w-32 rounded-xl bg-violet-500/20 px-4 py-4 text-center font-display text-2xl font-black text-violet-200">W.O.</div>:<div className="flex min-w-32 items-center justify-center gap-3 rounded-xl bg-black/30 px-4 py-3 font-display text-3xl font-black text-white sm:text-4xl"><span>{tvScore(match.score_a)}</span><span className="text-white/30">:</span><span>{tvScore(match.score_b)}</span></div>}<TvTeam participant={match.participant_b} winner={winnerB}/></div>
     {match.best_of_sets&&match.set_scores?.some(set=>set.score_a!==null||set.score_b!==null)&&<div className="flex flex-wrap justify-center gap-2 border-t border-white/10 px-4 py-2 text-[10px] font-bold text-slate-300">{match.set_scores.map((set,index)=>(set.score_a!==null||set.score_b!==null)&&<span key={index} className="rounded-lg bg-white/10 px-2 py-1">S{index+1} · {set.score_a??'–'}–{set.score_b??'–'}{set.completed?' ✓':''}</span>)}</div>}
   </article>
 }
 
 function TvUpcomingCard({match, index}) {
-  return <article className="grid grid-cols-[54px_1fr_auto] items-center gap-3 rounded-2xl border border-white/10 bg-white/[.05] p-3"><span className="grid size-11 place-items-center rounded-xl bg-blue-500/20 font-display text-lg font-black text-blue-200">{index+1}</span><div className="min-w-0"><div className="text-[10px] font-black uppercase tracking-wider text-cyan-300">Match {pad(match.match_number)} · {match.round_label}</div><div className="mt-1 truncate font-bold text-white">{nameOf(match.participant_a)} <span className="text-white/30">vs</span> {nameOf(match.participant_b)}</div><div className="mt-1 flex gap-3 text-[11px] text-slate-400"><span>{match.venue || 'Venue belum ditentukan'}</span>{match.group_name&&<span>{match.group_name}</span>}</div></div><time className="rounded-xl bg-white/10 px-3 py-2 text-center"><b className="block font-display text-xl text-white">{timeValue(match.scheduled_at)}</b><span className="text-[10px] font-bold text-slate-400">WIB · {dateKey(match.scheduled_at)}</span></time></article>
+  return <article className="grid grid-cols-[54px_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl border border-white/10 bg-white/[.05] p-3"><span className="grid size-11 place-items-center rounded-xl bg-blue-500/20 font-display text-lg font-black text-blue-200">{index+1}</span><div className="min-w-0"><div className="text-[10px] font-black uppercase tracking-wider text-cyan-300">Match {pad(match.match_number)} · {match.round_label}</div><div className="mt-2 flex min-w-0 items-center gap-2"><TvTeamLogo participant={match.participant_a} compact/><div className="min-w-0 flex-1 truncate font-bold text-white">{nameOf(match.participant_a)} <span className="text-white/30">vs</span> {nameOf(match.participant_b)}</div><TvTeamLogo participant={match.participant_b} compact/></div><div className="mt-2 flex gap-3 text-[11px] text-slate-400"><span>{match.venue || 'Venue belum ditentukan'}</span>{match.group_name&&<span>{match.group_name}</span>}</div></div><time className="rounded-xl bg-white/10 px-3 py-2 text-center"><b className="block font-display text-xl text-white">{timeValue(match.scheduled_at)}</b><span className="text-[10px] font-bold text-slate-400">WIB · {dateKey(match.scheduled_at)}</span></time></article>
 }
 
 export function TournamentTv() {

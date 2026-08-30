@@ -86,9 +86,9 @@ class ScheduleController extends Controller
     private function matchQuery(TournamentDraw $draw)
     {
         return $draw->matches()->with([
-            'participantA:id,full_name,team_name,school_name',
-            'participantB:id,full_name,team_name,school_name',
-            'winner:id,full_name,team_name,school_name',
+            'participantA:id,full_name,team_name,school_name,school_logo_path',
+            'participantB:id,full_name,team_name,school_name,school_logo_path',
+            'winner:id,full_name,team_name,school_name,school_logo_path',
         ])->orderBy('match_number');
     }
 

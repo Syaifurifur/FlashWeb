@@ -510,12 +510,15 @@ class EventManagementTest extends TestCase
             'competition_id'=>$competition->id,'ticket_code'=>'VOLI-'.$number,'full_name'=>'Tim Voli '.$number,
             'whatsapp'=>'08127777000'.$number,'email'=>'voli'.$number.'@test.id','birth_place'=>'Bogor','birth_date'=>'2009-01-01',
             'grade'=>'XI','nisn'=>(string)(7500000000+$number),'mother_name'=>'Ibu','school_name'=>'Sekolah Voli '.$number,
+            'school_logo_path'=>'school-logos/voli-'.$number.'.png',
             'teacher_name'=>'Guru','teacher_contact'=>'081298765432','student_card_path'=>'a.pdf','delegation_letter_path'=>'b.pdf','photo_path'=>'c.jpg','consent'=>true,'status'=>'approved',
         ]);
         $draw=$this->withToken('admin-voli-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
             'mode'=>'random','format'=>'single_elimination',
         ])->assertCreated();
-        $this->withToken('admin-voli-token')->postJson('/api/manage/tournaments/draws/'.$draw->json('id').'/lock')->assertOk();
+        $this->withToken('admin-voli-token')->postJson('/api/manage/tournaments/draws/'.$draw->json('id').'/lock')
+            ->assertOk()->assertJsonFragment(['school_logo_path'=>'school-logos/voli-1.png'])
+            ->assertJsonFragment(['school_logo_path'=>'school-logos/voli-2.png']);
         $match=TournamentMatch::where('tournament_draw_id',$draw->json('id'))->firstOrFail();
 
         $this->withToken('admin-voli-token')->putJson('/api/manage/tournaments/matches/'.$match->id,[
