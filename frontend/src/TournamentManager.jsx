@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, ChevronDown, ChevronUp, Download, GripVertical, LockKeyhole, Play, Printer, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api } from './api'
+import { VolleyballScoreEditor } from './VolleyballScore'
+import { normalizeVolleyballSets, volleyballSummary } from './volleyball-score-utils'
 
 const nameOf = participant => participant?.team_name || participant?.full_name || 'BYE'
-const jakartaDate = value => value ? new Intl.DateTimeFormat('en-CA', {timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit'}).format(new Date(value)) : ''
-const jakartaTime = value => value ? new Intl.DateTimeFormat('en-GB', {timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false}).format(new Date(value)) : ''
-const localDateTime = value => value ? `${jakartaDate(value)}T${jakartaTime(value)}` : ''
 const dateTime = value => value ? new Intl.DateTimeFormat('id-ID', {dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Jakarta'}).format(new Date(value))+' WIB' : 'Belum dijadwalkan'
+const matchStatusLabels = {unscheduled:'Belum dimulai', upcoming:'Akan datang', check_in:'Check-in', ongoing:'Sedang berlangsung', delayed:'Tertunda', completed:'Selesai', walkover:'Walkover', cancelled:'Dibatalkan', bye:'Bye'}
 const formatLabels = {
   single_elimination: 'Single Elimination',
   double_elimination: 'Double Elimination',
@@ -40,22 +40,37 @@ function ManualGroupPlacement({groupCount, assignments, participants, moveToGrou
   </section>
 }
 
-function MatchEditor({match, reload, locked}) {
+function MatchEditor({match, reload, drawingLocked, volleyball = false}) {
   const [scoreA, setScoreA] = useState(match.score_a ?? '')
   const [scoreB, setScoreB] = useState(match.score_b ?? '')
-  const [scheduled, setScheduled] = useState(localDateTime(match.scheduled_at))
-  const [venue, setVenue] = useState(match.venue || '')
+  const [bestOf, setBestOf] = useState(match.best_of_sets || 3)
+  const [setScores, setSetScores] = useState(() => normalizeVolleyballSets(match.best_of_sets || 3, match.set_scores))
   const [busy, setBusy] = useState(false)
+  const participantsReady = Boolean(match.participant_a_id && match.participant_b_id)
+  const finalStatus = ['bye', 'walkover', 'cancelled'].includes(match.status)
+  const canOperate = drawingLocked && participantsReady && !finalStatus
+  const scoreReady = scoreA !== '' && scoreB !== ''
+  const setSummary = volleyballSummary(bestOf, setScores)
 
-  const save = async status => {
+  useEffect(() => {
+    setScoreA(match.score_a ?? '')
+    setScoreB(match.score_b ?? '')
+    setBestOf(match.best_of_sets || 3)
+    setSetScores(normalizeVolleyballSets(match.best_of_sets || 3, match.set_scores))
+  }, [match.score_a, match.score_b, match.best_of_sets, match.set_scores])
+
+  const save = async (status, includeScore = false) => {
+    if (!canOperate) return
+    if (!volleyball && includeScore && !scoreReady) { alert('Isi skor kedua tim terlebih dahulu.'); return }
+    if (!volleyball && status === 'completed' && match.stage !== 'group' && Number(scoreA) === Number(scoreB)) { alert('Skor pertandingan gugur tidak boleh seri.'); return }
+    if (volleyball && status === 'completed' && !setSummary.decided) { alert(`Salah satu tim harus memenangkan ${setSummary.requiredWins} set.`); return }
+    if (status === 'ongoing' && match.status !== 'ongoing' && !confirm('Mulai pertandingan sekarang langsung dari bagan? Jadwal pertandingan tidak menjadi syarat.')) return
+    if (status === 'completed' && !confirm(`${match.status === 'completed' ? 'Simpan perubahan' : 'Selesaikan pertandingan'} dengan skor ${volleyball ? `${setSummary.winsA} - ${setSummary.winsB} set` : `${scoreA} - ${scoreB}`}?`)) return
     setBusy(true)
     try {
       await api(`/manage/tournaments/matches/${match.id}`, {method: 'PUT', body: JSON.stringify({
-        score_a: scoreA === '' ? null : Number(scoreA),
-        score_b: scoreB === '' ? null : Number(scoreB),
-        scheduled_at: scheduled || null,
-        venue,
         status,
+        ...(volleyball ? {best_of_sets:bestOf, set_scores:setScores.map(set => ({score_a:set.score_a === '' ? null : Number(set.score_a), score_b:set.score_b === '' ? null : Number(set.score_b), completed:set.completed}))} : includeScore ? {score_a: Number(scoreA), score_b: Number(scoreB)} : {}),
       })})
       reload()
     } catch {
@@ -66,21 +81,27 @@ function MatchEditor({match, reload, locked}) {
   }
 
   return <article className="rounded-2xl border bg-white p-4">
-    <div className="flex flex-wrap items-center justify-between gap-2"><b className="text-xs text-blue-600">MATCH {String(match.match_number).padStart(2, '0')} · {match.round_label}</b><span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold">{match.status}</span></div>
-    <div className="mt-3 grid grid-cols-[minmax(0,1fr)_70px] items-center gap-2 text-sm">
-      <span className={match.winner_id === match.participant_a_id ? 'font-black text-emerald-700' : 'font-bold'}>{nameOf(match.participant_a)}</span><input className="input py-2 text-center" type="number" min="0" value={scoreA} onChange={event => setScoreA(event.target.value)} disabled={locked || !match.participant_a_id}/>
-      <span className={match.winner_id === match.participant_b_id ? 'font-black text-emerald-700' : 'font-bold'}>{nameOf(match.participant_b)}</span><input className="input py-2 text-center" type="number" min="0" value={scoreB} onChange={event => setScoreB(event.target.value)} disabled={locked || !match.participant_b_id}/>
-    </div>
-    <div className="mt-3 grid gap-2 sm:grid-cols-2"><label><span className="label">Waktu (WIB)</span><input className="input py-2 text-sm" type="datetime-local" value={scheduled} onChange={event => setScheduled(event.target.value)} disabled={locked}/></label><label><span className="label">Lapangan / lokasi</span><input className="input py-2 text-sm" value={venue} onChange={event => setVenue(event.target.value)} placeholder="Lapangan / lokasi" disabled={locked}/></label></div>
-    {!locked && <div className="mt-3 grid gap-2 sm:flex sm:justify-end"><button className="btn-ghost py-2 text-xs" disabled={busy} onClick={() => save('ongoing')}>Berlangsung</button><button className="btn-dark py-2 text-xs" disabled={busy || !match.participant_a_id || !match.participant_b_id} onClick={() => save('completed')}>Konfirmasi Skor</button></div>}
+    <div className="flex flex-wrap items-center justify-between gap-2"><b className="text-xs text-blue-600">MATCH {String(match.match_number).padStart(2, '0')} · {match.round_label}</b><span className={`rounded-full px-2 py-1 text-[11px] font-bold ${match.status === 'ongoing' ? 'bg-emerald-100 text-emerald-700' : match.status === 'completed' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'}`}>{matchStatusLabels[match.status] || match.status}</span></div>
+    {!volleyball && <div className="mt-3 grid grid-cols-[minmax(0,1fr)_70px] items-center gap-2 text-sm">
+      <span className={match.winner_id === match.participant_a_id ? 'font-black text-emerald-700' : 'font-bold'}>{nameOf(match.participant_a)}</span><input aria-label={`Skor ${nameOf(match.participant_a)}`} className="input py-2 text-center" type="number" min="0" value={scoreA} onChange={event => setScoreA(event.target.value)} disabled={!canOperate || !['ongoing','completed'].includes(match.status)}/>
+      <span className={match.winner_id === match.participant_b_id ? 'font-black text-emerald-700' : 'font-bold'}>{nameOf(match.participant_b)}</span><input aria-label={`Skor ${nameOf(match.participant_b)}`} className="input py-2 text-center" type="number" min="0" value={scoreB} onChange={event => setScoreB(event.target.value)} disabled={!canOperate || !['ongoing','completed'].includes(match.status)}/>
+    </div>}
+    {volleyball && participantsReady && <VolleyballScoreEditor bestOf={bestOf} onBestOfChange={setBestOf} scores={setScores} onScoresChange={setSetScores} participantA={nameOf(match.participant_a)} participantB={nameOf(match.participant_b)} chooseFormat={!['ongoing','completed'].includes(match.status)} disabled={!canOperate} scoresDisabled={!['ongoing','completed'].includes(match.status)}/>}
+    {!drawingLocked && <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs font-bold text-amber-800">Kunci drawing terlebih dahulu untuk menjalankan pertandingan.</p>}
+    {drawingLocked && !participantsReady && <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs font-bold text-slate-500">Menunggu peserta dari pertandingan sebelumnya.</p>}
+    {canOperate && <div className="mt-3 grid gap-2 sm:flex sm:justify-end">
+      {!['ongoing','completed'].includes(match.status) && <button className="btn-primary py-2 text-xs" disabled={busy} onClick={() => save('ongoing')}><Play size={14}/>Mulai Pertandingan</button>}
+      {match.status === 'ongoing' && <><button className="btn-ghost py-2 text-xs" disabled={busy || (!volleyball && !scoreReady)} onClick={() => save('ongoing', true)}>Simpan Skor</button><button className="btn-dark py-2 text-xs" disabled={busy || (volleyball ? !setSummary.decided : !scoreReady)} onClick={() => save('completed', true)}>Selesaikan</button></>}
+      {match.status === 'completed' && <button className="btn-dark py-2 text-xs" disabled={busy || (volleyball ? !setSummary.decided : !scoreReady)} onClick={() => save('completed', true)}>Simpan Perubahan Skor</button>}
+    </div>}
   </article>
 }
 
-function GroupStandings({groups}) {
+function GroupStandings({groups, volleyball = false}) {
   if (!groups?.length) return null
   return <section className="mt-6 rounded-3xl bg-white p-4 sm:p-7">
-    <div className="flex flex-wrap items-end justify-between gap-3"><div><div className="text-xs font-black uppercase tracking-[.16em] text-emerald-700">Hasil Group Stage</div><h2 className="mt-1 font-display text-2xl font-bold">Klasemen Grup</h2></div><p className="text-xs text-slate-500">Urutan: poin, selisih gol, gol memasukkan, lalu jumlah kemenangan.</p></div>
-    <div className="mt-5 grid gap-5 xl:grid-cols-2">{groups.map(group => <article key={group.name} className="overflow-hidden rounded-2xl border"><div className="flex items-center justify-between bg-slate-50 px-4 py-3"><b className="font-display">{group.name}</b><span className={`rounded-full px-2 py-1 text-[10px] font-black ${group.completed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{group.completed ? 'Final' : `${group.played_matches}/${group.total_matches} laga`}</span></div><div className="overflow-x-auto"><table className="w-full min-w-[620px] text-xs"><thead className="bg-ink text-[#fff]"><tr><th className="px-3 py-2 text-center">#</th><th className="px-3 py-2 text-left">Tim</th><th title="Main" className="px-2 py-2">MP</th><th title="Menang" className="px-2 py-2">M</th><th title="Seri" className="px-2 py-2">S</th><th title="Kalah" className="px-2 py-2">K</th><th title="Gol memasukkan" className="px-2 py-2">GM</th><th title="Gol kemasukan" className="px-2 py-2">GK</th><th title="Selisih gol" className="px-2 py-2">SG</th><th className="px-3 py-2">Poin</th></tr></thead><tbody>{group.rows.map(row => <tr key={row.registration_id} className={`border-t ${row.qualified ? 'bg-emerald-50' : ''}`}><td className="px-3 py-3 text-center font-black">{row.position}</td><td className="px-3 py-3"><b>{nameOf(row.participant)}</b>{row.qualified && <span className="ml-2 rounded-full bg-emerald-600 px-2 py-1 text-[9px] font-black text-white">LOLOS</span>}<span className="mt-1 block text-[10px] text-slate-400">{row.participant?.school_name}</span></td><td className="px-2 py-3 text-center">{row.played}</td><td className="px-2 py-3 text-center">{row.won}</td><td className="px-2 py-3 text-center">{row.drawn}</td><td className="px-2 py-3 text-center">{row.lost}</td><td className="px-2 py-3 text-center">{row.goals_for}</td><td className="px-2 py-3 text-center">{row.goals_against}</td><td className="px-2 py-3 text-center">{row.goal_difference}</td><td className="px-3 py-3 text-center font-black">{row.points}</td></tr>)}</tbody></table></div></article>)}</div>
+    <div className="flex flex-wrap items-end justify-between gap-3"><div><div className="text-xs font-black uppercase tracking-[.16em] text-emerald-700">Hasil Group Stage</div><h2 className="mt-1 font-display text-2xl font-bold">Klasemen Grup</h2></div><p className="text-xs text-slate-500">{volleyball ? 'Urutan: poin, selisih set, set menang, lalu jumlah kemenangan.' : 'Urutan: poin, selisih gol, gol memasukkan, lalu jumlah kemenangan.'}</p></div>
+    <div className="mt-5 grid gap-5 xl:grid-cols-2">{groups.map(group => <article key={group.name} className="overflow-hidden rounded-2xl border"><div className="flex items-center justify-between bg-slate-50 px-4 py-3"><b className="font-display">{group.name}</b><span className={`rounded-full px-2 py-1 text-[10px] font-black ${group.completed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{group.completed ? 'Final' : `${group.played_matches}/${group.total_matches} laga`}</span></div><div className="overflow-x-auto"><table className="w-full min-w-[620px] text-xs"><thead className="bg-ink text-[#fff]"><tr><th className="px-3 py-2 text-center">#</th><th className="px-3 py-2 text-left">Tim</th><th title="Main" className="px-2 py-2">MP</th><th title="Menang" className="px-2 py-2">M</th><th title="Seri" className="px-2 py-2">S</th><th title="Kalah" className="px-2 py-2">K</th><th title={volleyball ? 'Set menang' : 'Gol memasukkan'} className="px-2 py-2">{volleyball ? 'SM' : 'GM'}</th><th title={volleyball ? 'Set kalah' : 'Gol kemasukan'} className="px-2 py-2">{volleyball ? 'SK' : 'GK'}</th><th title={volleyball ? 'Selisih set' : 'Selisih gol'} className="px-2 py-2">{volleyball ? 'SS' : 'SG'}</th><th className="px-3 py-2">Poin</th></tr></thead><tbody>{group.rows.map(row => <tr key={row.registration_id} className={`border-t ${row.qualified ? 'bg-emerald-50' : ''}`}><td className="px-3 py-3 text-center font-black">{row.position}</td><td className="px-3 py-3"><b>{nameOf(row.participant)}</b>{row.qualified && <span className="ml-2 rounded-full bg-emerald-600 px-2 py-1 text-[9px] font-black text-white">LOLOS</span>}<span className="mt-1 block text-[10px] text-slate-400">{row.participant?.school_name}</span></td><td className="px-2 py-3 text-center">{row.played}</td><td className="px-2 py-3 text-center">{row.won}</td><td className="px-2 py-3 text-center">{row.drawn}</td><td className="px-2 py-3 text-center">{row.lost}</td><td className="px-2 py-3 text-center">{row.goals_for}</td><td className="px-2 py-3 text-center">{row.goals_against}</td><td className="px-2 py-3 text-center">{row.goal_difference}</td><td className="px-3 py-3 text-center font-black">{row.points}</td></tr>)}</tbody></table></div></article>)}</div>
   </section>
 }
 
@@ -313,8 +334,8 @@ export function TournamentManager() {
         {forceAudit && <div className="mt-5 rounded-2xl border border-amber-300 bg-amber-50 p-4"><div className="flex items-center gap-2 font-display font-bold text-amber-950"><AlertTriangle size={18}/>Audit force majeure</div><p className="mt-2 text-sm leading-6 text-amber-900">{forceAudit.reason}</p><p className="mt-2 text-xs font-bold text-amber-700">Disetujui {forceAudit.approved_by?.name} · {dateTime(forceAudit.approved_at)} · {forceAudit.teams?.length || 0} tim</p></div>}
         <div className="mt-6 grid gap-2 sm:grid-cols-2">{data.draw.entries.slice(0, reveal).map(entry => <div key={entry.id} className={`rounded-xl border p-3 ${forceAuditIds.includes(entry.registration_id) ? 'border-amber-300 bg-amber-50' : ''}`}><span className="mr-3 inline-grid size-7 place-items-center rounded-full bg-blue-600 text-xs font-bold text-white">{entry.slot_number}</span><b>{entry.is_bye ? 'BYE' : nameOf(entry.registration)}</b>{forceAuditIds.includes(entry.registration_id) && <span className="ml-2 rounded-full bg-amber-200 px-2 py-1 text-[10px] font-black uppercase text-amber-800">Force majeure</span>}<span className="ml-2 text-xs text-slate-400">{entry.group_name || entry.registration?.school_name}</span></div>)}</div>
       </section>
-      <GroupStandings groups={data.draw.group_standings}/>
-      <section className="mt-6"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="font-display text-2xl font-bold">Bagan Pertandingan</h2>{data.draw.format === 'groups_knockout' && !data.draw.matches.some(match => match.stage === 'knockout') && <button className="btn-dark" onClick={async () => {try {await api(`/manage/tournaments/draws/${data.draw.id}/knockout`, {method: 'POST'}); reload()} catch { /* Pusat pesan aplikasi menampilkan kesalahan. */ }}}>Buat Babak Knockout</button>}</div><div className="grid gap-5 xl:grid-cols-2">{data.draw.matches.map(match => <MatchEditor key={match.id} match={match} reload={reload} locked={locked}/>)}</div></section>
+      <GroupStandings groups={data.draw.group_standings} volleyball={data.competition.scoring_mode === 'volleyball_sets'}/>
+      <section className="mt-6"><div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><h2 className="font-display text-2xl font-bold">Bagan Pertandingan</h2><p className="mt-1 text-sm text-slate-500">Mulai pertandingan, simpan skor berjalan, dan selesaikan laga langsung dari bagan tanpa membuka menu Jadwal.</p></div>{data.draw.format === 'groups_knockout' && !data.draw.matches.some(match => match.stage === 'knockout') && <button className="btn-dark" onClick={async () => {try {await api(`/manage/tournaments/draws/${data.draw.id}/knockout`, {method: 'POST'}); reload()} catch { /* Pusat pesan aplikasi menampilkan kesalahan. */ }}}>Buat Babak Knockout</button>}</div><div className="grid gap-5 xl:grid-cols-2">{data.draw.matches.map(match => <MatchEditor key={match.id} match={match} reload={reload} drawingLocked={locked} volleyball={data.competition.scoring_mode === 'volleyball_sets'}/>)}</div></section>
       <section className="mt-6 rounded-3xl bg-white p-5"><h2 className="font-display font-bold">Riwayat Drawing Ulang</h2><div className="mt-3 flex flex-wrap gap-2">{data.history.map(item => <span key={item.id} className="rounded-full bg-slate-100 px-3 py-2 text-xs font-bold">Versi {item.version} · {item.mode} · {dateTime(item.drawn_at)} · {item.status}</span>)}</div></section>
     </>}
   </div>

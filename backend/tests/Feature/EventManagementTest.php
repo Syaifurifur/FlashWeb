@@ -466,7 +466,14 @@ class EventManagementTest extends TestCase
         $this->withToken('admin-tournament-token')->postJson('/api/manage/tournaments/draws/'.$groupDrawId.'/lock')->assertOk();
         $firstGroupMatch=$groupMatches->shift();
         $this->withToken('admin-tournament-token')->putJson('/api/manage/tournaments/matches/'.$firstGroupMatch->id,[
-            'score_a'=>2,'score_b'=>1,'status'=>'completed','venue'=>'Lapangan Grup',
+            'status'=>'ongoing',
+        ])->assertOk()->assertJsonFragment(['id'=>$firstGroupMatch->id,'status'=>'ongoing']);
+        $this->assertDatabaseHas('tournament_matches',['id'=>$firstGroupMatch->id,'status'=>'ongoing','scheduled_at'=>null]);
+        $this->withToken('admin-tournament-token')->putJson('/api/manage/tournaments/matches/'.$firstGroupMatch->id,[
+            'score_a'=>1,'score_b'=>0,'status'=>'ongoing',
+        ])->assertOk()->assertJsonFragment(['id'=>$firstGroupMatch->id,'status'=>'ongoing','score_a'=>1,'score_b'=>0]);
+        $this->withToken('admin-tournament-token')->putJson('/api/manage/tournaments/matches/'.$firstGroupMatch->id,[
+            'score_a'=>2,'score_b'=>1,'status'=>'completed',
         ])->assertOk()->assertJsonPath('group_standings.0.played_matches',1)
             ->assertJsonPath('group_standings.0.rows.0.points',3);
         foreach($groupMatches as $match)$match->update(['score_a'=>2,'score_b'=>1,'winner_id'=>$match->participant_a_id,'status'=>'completed']);
@@ -492,6 +499,60 @@ class EventManagementTest extends TestCase
         $this->assertDatabaseHas('competition_results',['competition_id'=>$competition->id,'rank'=>4,'title'=>'Juara Harapan']);
         $this->getJson('/api/competitions/'.$competition->slug.'/tournament')
             ->assertOk()->assertJsonCount(2,'draw.group_standings');
+    }
+
+    public function test_volleyball_match_uses_configurable_best_of_sets_and_set_scores(): void
+    {
+        $competition=$this->competition();
+        $competition->update(['title'=>'BOLA VOLI PUTRI','slug'=>'bola-voli-putri']);
+        User::create(['name'=>'Admin Voli','email'=>'admin-voli@test.id','password'=>'password123','role'=>'super_admin','api_token'=>hash('sha256','admin-voli-token')]);
+        foreach(range(1,2) as $number) Registration::create([
+            'competition_id'=>$competition->id,'ticket_code'=>'VOLI-'.$number,'full_name'=>'Tim Voli '.$number,
+            'whatsapp'=>'08127777000'.$number,'email'=>'voli'.$number.'@test.id','birth_place'=>'Bogor','birth_date'=>'2009-01-01',
+            'grade'=>'XI','nisn'=>(string)(7500000000+$number),'mother_name'=>'Ibu','school_name'=>'Sekolah Voli '.$number,
+            'teacher_name'=>'Guru','teacher_contact'=>'081298765432','student_card_path'=>'a.pdf','delegation_letter_path'=>'b.pdf','photo_path'=>'c.jpg','consent'=>true,'status'=>'approved',
+        ]);
+        $draw=$this->withToken('admin-voli-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw',[
+            'mode'=>'random','format'=>'single_elimination',
+        ])->assertCreated();
+        $this->withToken('admin-voli-token')->postJson('/api/manage/tournaments/draws/'.$draw->json('id').'/lock')->assertOk();
+        $match=TournamentMatch::where('tournament_draw_id',$draw->json('id'))->firstOrFail();
+
+        $this->withToken('admin-voli-token')->putJson('/api/manage/tournaments/matches/'.$match->id,[
+            'status'=>'ongoing',
+        ])->assertUnprocessable()->assertJsonPath('message','Pilih jumlah set pertandingan: 1, best of 3, atau best of 5.');
+
+        $this->withToken('admin-voli-token')->putJson('/api/manage/tournaments/matches/'.$match->id,[
+            'status'=>'ongoing','best_of_sets'=>3,
+        ])->assertOk()->assertJsonFragment(['id'=>$match->id,'status'=>'ongoing','best_of_sets'=>3]);
+
+        $liveSets=[
+            ['score_a'=>25,'score_b'=>18,'completed'=>true],
+            ['score_a'=>10,'score_b'=>10,'completed'=>false],
+        ];
+        $this->withToken('admin-voli-token')->putJson('/api/manage/schedules/matches/'.$match->id,[
+            'status'=>'ongoing','best_of_sets'=>3,'set_scores'=>$liveSets,
+            'scheduled_at'=>'2031-09-01 08:00:00','venue'=>'Lapangan Voli','duration_minutes'=>90,
+        ])->assertOk()->assertJsonFragment(['id'=>$match->id,'status'=>'ongoing','score_a'=>1,'score_b'=>0]);
+        $this->withToken('admin-voli-token')->putJson('/api/manage/tournaments/matches/'.$match->id,[
+            'status'=>'completed','best_of_sets'=>3,'set_scores'=>$liveSets,
+        ])->assertUnprocessable()->assertJsonPath('message','Set yang sedang berjalan harus ditandai selesai terlebih dahulu.');
+
+        $finalSets=[
+            ['score_a'=>25,'score_b'=>18,'completed'=>true],
+            ['score_a'=>25,'score_b'=>20,'completed'=>true],
+        ];
+        $this->withToken('admin-voli-token')->putJson('/api/manage/tournaments/matches/'.$match->id,[
+            'status'=>'completed','best_of_sets'=>3,'set_scores'=>$finalSets,
+        ])->assertOk()->assertJsonFragment([
+            'id'=>$match->id,'status'=>'completed','best_of_sets'=>3,'score_a'=>2,'score_b'=>0,'winner_id'=>$match->participant_a_id,
+        ]);
+        $this->assertDatabaseHas('tournament_matches',[
+            'id'=>$match->id,'best_of_sets'=>3,'score_a'=>2,'score_b'=>0,'winner_id'=>$match->participant_a_id,'status'=>'completed',
+        ]);
+        $this->withToken('admin-voli-token')->putJson('/api/manage/tournaments/matches/'.$match->id,[
+            'status'=>'completed','best_of_sets'=>5,'set_scores'=>$finalSets,
+        ])->assertUnprocessable()->assertJsonPath('message','Jumlah set tidak dapat diubah setelah pertandingan dimulai.');
     }
 
     public function test_team_drawing_trusts_approved_verifier_decision_even_when_team_is_incomplete(): void
@@ -631,6 +692,16 @@ class EventManagementTest extends TestCase
         ])->assertOk();
         $this->assertDatabaseHas('tournament_matches',['id'=>$matches[0]->id,'scheduled_at'=>'2030-01-15 01:00:00']);
         $this->assertDatabaseHas('competition_notifications',['competition_id'=>$competition->id,'title'=>'Pembaruan Jadwal Match '.$matches[0]->match_number]);
+
+        // Jadwal adalah acuan operasional, bukan pengunci waktu mulai pertandingan.
+        // Petugas tetap dapat memulai laga lebih awal tanpa mengubah waktu jadwal.
+        $this->withToken('pic-jadwal-token')->putJson('/api/manage/schedules/matches/'.$matches[0]->id,[
+            'scheduled_at'=>$startsAt,'venue'=>'Lapangan Utama','duration_minutes'=>60,'status'=>'ongoing',
+        ])->assertOk()->assertJsonFragment(['id'=>$matches[0]->id,'status'=>'ongoing']);
+        $this->assertDatabaseHas('tournament_matches',['id'=>$matches[0]->id,'scheduled_at'=>'2030-01-15 01:00:00','status'=>'ongoing']);
+        $this->withToken('pic-jadwal-token')->putJson('/api/manage/schedules/matches/'.$matches[0]->id,[
+            'scheduled_at'=>$startsAt,'venue'=>'Lapangan Utama','duration_minutes'=>60,'status'=>'upcoming',
+        ])->assertOk();
 
         $this->withToken('pic-jadwal-token')->putJson('/api/manage/schedules/matches/'.$matches[1]->id,[
             'scheduled_at'=>$startsAt,'venue'=>'Lapangan Utama','duration_minutes'=>60,'status'=>'upcoming',
@@ -1096,6 +1167,7 @@ class EventManagementTest extends TestCase
 
     public function test_home_content_can_be_managed_without_image_slideshows(): void
     {
+        Storage::fake('public');
         $competition=$this->competition();
         User::create(['name'=>'Admin Content','email'=>'admin-content@test.id','password'=>'password123','role'=>'super_admin','api_token'=>hash('sha256','admin-content-token')]);
         User::create(['name'=>'PIC Content','email'=>'pic-content@test.id','password'=>'password123','role'=>'pic','competition_id'=>$competition->id,'api_token'=>hash('sha256','pic-content-token')]);
@@ -1131,6 +1203,24 @@ class EventManagementTest extends TestCase
             ->assertJsonPath('testimonial_title','Cerita Para Juara')->assertJsonPath('testimonials.0.name','Alya Putri')
             ->assertJsonPath('sponsors.0.name','Sponsor Satu')->assertJsonPath('media_partners.0.name','Media Satu');
         $this->assertDatabaseHas('site_contents',['key'=>'landing_extras']);
+
+        $uploadedLogo = $this->withToken('admin-content-token')->post('/api/manage/content/landing-extras', [
+            'sponsor_title'=>'Sponsor BSI Flash 2027',
+            'sponsors'=>[['name'=>'Sponsor Upload','logo_url'=>'','website_url'=>'https://sponsor.test']],
+            'sponsor_logos'=>[UploadedFile::fake()->image('sponsor-upload.png', 800, 400)],
+            'media_partner_title'=>'Media Partners',
+            'media_partners'=>[['name'=>'Media Satu','logo_url'=>'https://example.com/media.png','website_url'=>'https://example.com/media']],
+        ])->assertOk()->assertJsonPath('sponsors.0.name','Sponsor Upload');
+        $uploadedLogoUrl = $uploadedLogo->json('sponsors.0.logo_url');
+        $this->assertStringStartsWith('/storage/site-content/sponsors/', $uploadedLogoUrl);
+        Storage::disk('public')->assertExists(str_replace('/storage/', '', $uploadedLogoUrl));
+
+        $this->withToken('admin-content-token')->postJson('/api/manage/content/landing-extras', [
+            'sponsor_title'=>'Sponsor BSI Flash 2027', 'sponsors'=>[],
+            'media_partner_title'=>'Media Partners',
+            'media_partners'=>[['name'=>'Media Satu','logo_url'=>'https://example.com/media.png','website_url'=>'https://example.com/media']],
+        ])->assertOk()->assertJsonCount(0, 'sponsors');
+        Storage::disk('public')->assertMissing(str_replace('/storage/', '', $uploadedLogoUrl));
 
         $consent = [
             'title'=>'Persetujuan Data BSI Flash 2027',

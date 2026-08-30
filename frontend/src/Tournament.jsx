@@ -482,6 +482,7 @@ function PublicMatch({ match }) {
         </div>
         <b>{match.score_b ?? '-'}</b>
       </div>
+      {match.best_of_sets&&match.set_scores?.some(set=>set.score_a!==null||set.score_b!==null)&&<div className="mt-3 flex flex-wrap gap-2 border-t pt-3 text-[10px] font-bold text-slate-500">{match.set_scores.map((set,index)=>(set.score_a!==null||set.score_b!==null)&&<span key={index} className="rounded-lg bg-slate-100 px-2 py-1">Set {index+1}: {set.score_a??'–'}–{set.score_b??'–'}{set.completed?' ✓':''}</span>)}</div>}
       <div className="mt-4 border-t pt-3 text-xs text-slate-500">
         <p>{match.venue || 'Lokasi belum ditentukan'}</p>
         <p>{dateTime(match.scheduled_at)}</p>

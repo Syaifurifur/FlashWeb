@@ -11,6 +11,7 @@ use App\Models\TournamentMatch;
 use App\Models\TournamentScheduleBlock;
 use App\Models\EventEdition;
 use App\Models\CompetitionResult;
+use App\Support\VolleyballScoring;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -100,6 +101,7 @@ class ScheduleController extends Controller
 
         return [
             'competition' => [...$competition->only(['id','title','slug','category','event_date']),
+                'scoring_mode'=>VolleyballScoring::mode($competition),
                 'event_date'=>$session?->competition_start_date?->format('Y-m-d') ?: $competition->event_date?->format('Y-m-d'),
                 'venues' => $this->venues($competition,$session)],
             'session' => $session?->only(['id','competition_id','venue_id','city','venue','competition_start_date','competition_end_date','schedule_venues']),
@@ -281,6 +283,8 @@ class ScheduleController extends Controller
             'duration_minutes' => 'required|integer|min:5|max:720',
             'status' => 'required|in:'.implode(',', self::STATUSES),
             'score_a' => 'nullable|numeric|min:0', 'score_b' => 'nullable|numeric|min:0',
+            'best_of_sets'=>'nullable|integer|in:1,3,5','set_scores'=>'nullable|array|max:5',
+            'set_scores.*.score_a'=>'nullable|integer|min:0|max:999','set_scores.*.score_b'=>'nullable|integer|min:0|max:999','set_scores.*.completed'=>'sometimes|boolean',
             'winner_id' => 'nullable|integer', 'force' => 'sometimes|boolean', 'notify' => 'sometimes|boolean',
         ]);
 
@@ -295,13 +299,20 @@ class ScheduleController extends Controller
         // sedangkan database tetap menyimpan waktu UTC agar tidak ambigu.
         if (!empty($data['scheduled_at'])) $data['scheduled_at'] = $this->jakartaToUtc($data['scheduled_at']);
 
-        if ($data['status'] === 'completed') {
+        if (VolleyballScoring::isCompetition($competition) && in_array($data['status'], ['ongoing','completed'], true)) {
             abort_unless($match->participant_a_id && $match->participant_b_id, 422, 'Peserta pertandingan belum lengkap.');
-            abort_unless(array_key_exists('score_a', $data) && array_key_exists('score_b', $data), 422, 'Skor kedua peserta harus diisi.');
-            if ((float)$data['score_a'] === (float)$data['score_b']) {
-                abort_if($match->stage !== 'group', 422, 'Skor pertandingan gugur tidak boleh seri.');
-                $data['winner_id'] = null;
-            } else $data['winner_id'] = (float)$data['score_a'] > (float)$data['score_b'] ? $match->participant_a_id : $match->participant_b_id;
+            $data = VolleyballScoring::apply($match, $competition, $data);
+        }
+
+        if ($data['status'] === 'completed') {
+            if (! VolleyballScoring::isCompetition($competition)) {
+                abort_unless($match->participant_a_id && $match->participant_b_id, 422, 'Peserta pertandingan belum lengkap.');
+                abort_unless(array_key_exists('score_a', $data) && array_key_exists('score_b', $data), 422, 'Skor kedua peserta harus diisi.');
+                if ((float)$data['score_a'] === (float)$data['score_b']) {
+                    abort_if($match->stage !== 'group', 422, 'Skor pertandingan gugur tidak boleh seri.');
+                    $data['winner_id'] = null;
+                } else $data['winner_id'] = (float)$data['score_a'] > (float)$data['score_b'] ? $match->participant_a_id : $match->participant_b_id;
+            }
         } elseif ($data['status'] === 'walkover') {
             abort_unless(in_array((int)($data['winner_id'] ?? 0), [$match->participant_a_id, $match->participant_b_id], true), 422, 'Pemenang walkover harus salah satu peserta pertandingan.');
         } elseif ($data['status'] !== 'bye') $data['winner_id'] = null;

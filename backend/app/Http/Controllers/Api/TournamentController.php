@@ -10,6 +10,7 @@ use App\Models\TournamentDraw;
 use App\Models\TournamentMatch;
 use App\Models\EventEdition;
 use App\Models\CompetitionResult;
+use App\Support\VolleyballScoring;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -124,7 +125,7 @@ class TournamentController extends Controller
     private function drawPayload(TournamentDraw $draw): TournamentDraw
     {
         $draw->load([
-            'operator:id,name','competition:id,title,slug',
+            'operator:id,name','competition:id,title,slug,category',
             'competitionSession:id,competition_id,venue_id,city,venue,competition_start_date,competition_end_date,schedule_venues',
             'competitionSession.venueRecord:id,slug,city,name',
             'entries.registration:id,full_name,team_name,school_name,status',
@@ -132,6 +133,8 @@ class TournamentController extends Controller
             'matches.participantB:id,full_name,team_name,school_name,status',
             'matches.winner:id,full_name,team_name,school_name,status',
         ]);
+
+        $draw->competition->setAttribute('scoring_mode', VolleyballScoring::mode($draw->competition));
 
         $draw->setAttribute('group_standings', $this->groupStandings($draw));
         return $draw;
@@ -213,7 +216,7 @@ class TournamentController extends Controller
     {
         $scopes=$this->scopeOptions($request);
         $scope=$this->selectedScope($request);
-        $options=$this->competitions($request)->orderBy('title')->get(['id','title','slug']);
+        $options=$this->competitions($request)->orderBy('title')->get(['id','title','slug','category']);
         if(!$scope)return ['scopes'=>$scopes,'competitions'=>$options,'competition'=>null,'session'=>null,'participants'=>[],'draw'=>null,'history'=>[],'can_unlock'=>$request->user()->role==='super_admin'];
         $competition=$this->competitions($request)->whereKey($scope['competition_id'])->firstOrFail();
         $session=$scope['session_id']?$this->accessibleSessions($request,$competition)->whereKey($scope['session_id'])->firstOrFail():null;
@@ -221,7 +224,7 @@ class TournamentController extends Controller
             ->orderBy('full_name')->get(['id','ticket_code','full_name','team_name','school_name']);
         $forceMajeureCandidates=$this->forceMajeureCandidates($competition,$session);
         $draw=$competition->tournamentDraws()->where('competition_session_id',$session?->id)->latest('version')->first();
-        return ['scopes'=>$scopes,'competitions'=>$options,'competition'=>$competition->only(['id','title','slug']),
+        return ['scopes'=>$scopes,'competitions'=>$options,'competition'=>[...$competition->only(['id','title','slug','category']),'scoring_mode'=>VolleyballScoring::mode($competition)],
             'session'=>$session?->only(['id','competition_id','venue_id','city','venue','competition_start_date','competition_end_date','schedule_venues']),
             'participants'=>$participants,'force_majeure_candidates'=>$forceMajeureCandidates,
             'drawing_readiness'=>[
@@ -416,14 +419,22 @@ class TournamentController extends Controller
     public function updateMatch(Request $request,TournamentMatch $match)
     {
         $this->authorizeDraw($request,$match->tournamentDraw);
-        $data=$request->validate(['score_a'=>'nullable|numeric|min:0','score_b'=>'nullable|numeric|min:0','scheduled_at'=>'nullable|date','venue'=>'nullable|string|max:160','duration_minutes'=>'nullable|integer|min:5|max:720','status'=>'required|in:unscheduled,upcoming,check_in,ongoing,delayed,completed,walkover,cancelled,bye']);
+        $data=$request->validate([
+            'score_a'=>'nullable|numeric|min:0','score_b'=>'nullable|numeric|min:0',
+            'best_of_sets'=>'nullable|integer|in:1,3,5','set_scores'=>'nullable|array|max:5',
+            'set_scores.*.score_a'=>'nullable|integer|min:0|max:999','set_scores.*.score_b'=>'nullable|integer|min:0|max:999','set_scores.*.completed'=>'sometimes|boolean',
+            'scheduled_at'=>'nullable|date','venue'=>'nullable|string|max:160','duration_minutes'=>'nullable|integer|min:5|max:720',
+            'status'=>'required|in:unscheduled,upcoming,check_in,ongoing,delayed,completed,walkover,cancelled,bye',
+        ]);
         if(!empty($data['scheduled_at']))$data['scheduled_at']=Carbon::parse($data['scheduled_at'],'Asia/Jakarta')->utc();
+        $competition=$match->tournamentDraw->competition;
+        if(VolleyballScoring::isCompetition($competition)&&in_array($data['status'],['ongoing','completed'],true))$data=VolleyballScoring::apply($match,$competition,$data);
         if($data['status']==='completed'){
             abort_unless($match->participant_a_id&&$match->participant_b_id,422,'Peserta pertandingan belum lengkap.');
-            if((float)$data['score_a']===(float)$data['score_b']){
+            if(!VolleyballScoring::isCompetition($competition)&&(float)$data['score_a']===(float)$data['score_b']){
                 abort_if($match->stage!=='group',422,'Skor pertandingan gugur tidak boleh seri.');
                 $data['winner_id']=null;
-            }else $data['winner_id']=(float)$data['score_a']>(float)$data['score_b']?$match->participant_a_id:$match->participant_b_id;
+            }elseif(!VolleyballScoring::isCompetition($competition)) $data['winner_id']=(float)$data['score_a']>(float)$data['score_b']?$match->participant_a_id:$match->participant_b_id;
         }else $data['winner_id']=null;
         $match->update($data);
         $this->resolveDependents($match);
@@ -508,7 +519,7 @@ class TournamentController extends Controller
             :($request->filled('city')?$sessions->first(fn($item)=>$item->venueRecord?->slug===$request->string('city')->toString()):$sessions->first());
         if($sessions->isNotEmpty())abort_unless($session,404);
         $draw=$competition->tournamentDraws()->where('competition_session_id',$session?->id)->where('status','locked')->latest('version')->first();
-        return ['competition'=>$competition->only(['id','title','slug']),
+        return ['competition'=>[...$competition->only(['id','title','slug','category']),'scoring_mode'=>VolleyballScoring::mode($competition)],
             'sessions'=>$sessions->map(fn($item)=>[...$item->only(['id','city','venue','competition_start_date','competition_end_date']),'venue_slug'=>$item->venueRecord?->slug])->values(),
             'session'=>$session?->only(['id','city','venue','competition_start_date','competition_end_date']),
             'draw'=>$draw?$this->drawPayload($draw):null];

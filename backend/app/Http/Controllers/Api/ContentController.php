@@ -201,6 +201,17 @@ class ContentController extends Controller
         ]);
     }
 
+    private function localLogoPaths(array ...$collections)
+    {
+        return collect($collections)->flatten(1)
+            ->pluck('logo_url')
+            ->filter(fn ($url) => is_string($url) && str_starts_with($url, '/storage/'))
+            ->map(fn ($url) => substr($url, strlen('/storage/')))
+            ->filter()
+            ->unique()
+            ->values();
+    }
+
     public function updateLandingExtras(Request $request)
     {
         $data = $request->validate([
@@ -226,6 +237,7 @@ class ContentController extends Controller
         ]);
 
         $current = $this->manageLandingExtras();
+        $oldLogoPaths = $this->localLogoPaths($current['sponsors'] ?? [], $current['media_partners'] ?? []);
         $testimonials = $current['testimonials'] ?? [];
         if ($request->boolean('testimonials_present') || array_key_exists('testimonials', $data)) {
             $testimonials = [];
@@ -278,7 +290,10 @@ class ContentController extends Controller
             'sponsor_title'=>$data['sponsor_title'], 'sponsors'=>$sponsors,
             'media_partner_title'=>$data['media_partner_title'], 'media_partners'=>$mediaPartners,
         ];
-        return $this->save(self::EXTRAS_KEY, $content, $request);
+        $saved = $this->save(self::EXTRAS_KEY, $content, $request);
+        $retainedLogoPaths = $this->localLogoPaths($sponsors, $mediaPartners);
+        $oldLogoPaths->diff($retainedLogoPaths)->each(fn ($path) => Storage::disk('public')->delete($path));
+        return $saved;
     }
 
     public function updateHero(Request $request)
