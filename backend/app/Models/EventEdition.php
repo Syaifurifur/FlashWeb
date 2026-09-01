@@ -15,12 +15,14 @@ class EventEdition extends Model
             'starts_at' => 'date',
             'ends_at' => 'date',
             'activated_at' => 'datetime',
+            'supporter_ticket_price' => 'decimal:2',
         ];
     }
 
     public function competitions() { return $this->hasMany(Competition::class); }
     public function venues() { return $this->hasMany(CompetitionVenue::class); }
     public function registrations() { return $this->hasMany(Registration::class); }
+    public function supporterTickets() { return $this->hasMany(SupporterTicket::class); }
     public function siteContents() { return $this->hasMany(SiteContent::class); }
     public function scholarshipLoaTemplates() { return $this->hasMany(ScholarshipLoaTemplate::class); }
 

@@ -103,6 +103,14 @@ class EventEditionController extends Controller
         $yearDelta = $target->year - $source->year;
         $venueMap = [];
 
+        $target->update($source->only([
+            'supporter_ticket_price',
+            'supporter_bank_name',
+            'supporter_bank_account_number',
+            'supporter_bank_account_holder',
+            'supporter_payment_note',
+        ]));
+
         $source->venues()->orderBy('id')->get()->each(function (CompetitionVenue $venue) use ($target, $yearDelta, &$venueMap) {
             $copy = $venue->replicate();
             $copy->event_edition_id = $target->id;

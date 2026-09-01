@@ -45,12 +45,24 @@ Database default: `bsiflash`, user MySQL `root`, tanpa password. Sesuaikan `back
 - Tombol WhatsApp publik dibuat otomatis untuk setiap PIC aktif yang ditugaskan
 - Meja verifikasi PIC, pembatasan data per lomba, dan ekspor CSV
 - Enkripsi nama ibu di database serta masking penuh dari akun PIC
+- Tiket supporter dengan pilihan tempat BSI Flash, harga dan rekening transfer yang dikelola admin, pembayaran cash/transfer, rekomendasi asal sekolah dari data peserta, upload bukti transfer, kode tiket otomatis, dan verifikasi admin
 
 ## Kebijakan Dokumentasi
 
 Setiap perubahan fitur, skema database, API, hak akses, atau alur pengguna wajib dicatat pada bagian **Changelog** di bawah. Entri terbaru ditempatkan paling atas dan memuat tanggal serta ringkasan perubahan.
 
 ## Changelog
+
+### 2026-09-01
+
+- Menambahkan formulir publik tiket supporter berisi nama, kelas, asal sekolah dengan rekomendasi dari database peserta, jenis kelamin, email, nomor telepon, dan minat kuliah tahun ini.
+- Mendukung pembayaran cash tanpa upload serta transfer dengan bukti wajib JPG/PNG/PDF maksimal 5 MB; setiap pemesanan mendapatkan kode tiket supporter unik.
+- Menambahkan menu Tiket Supporter pada panel admin dengan pencarian, filter pembayaran/status, ringkasan, pemeriksaan bukti transfer, serta keputusan menunggu, terverifikasi, atau ditolak dengan catatan.
+- Menambahkan download data tiket supporter dalam format XLSX yang mengikuti pencarian serta filter status dan metode pembayaran aktif, lengkap dengan header terformat, filter kolom, dan baris header beku.
+- Menambahkan pilihan wajib tempat BSI Flash pada pembelian tiket supporter, tampilan lokasi pada meja verifikasi, filter tiket per tempat, serta kolom nama tempat, kota, dan alamat pada file XLSX.
+- Menambahkan pengaturan admin untuk harga tiket supporter dan informasi transfer per tahun pelaksanaan, menampilkan harga secara menonjol serta rekening resmi pada halaman publik, menyimpan harga saat transaksi sebagai riwayat tiket, dan menambahkan harga pada daftar admin serta file XLSX.
+- Menambahkan ringkasan jumlah tiket supporter terjual berdasarkan status terverifikasi dan total pendapatan dari harga snapshot seluruh tiket terverifikasi.
+- Menambahkan izin `tickets.view` dan `tickets.review`, isolasi data per tahun pelaksanaan, migrasi database, dan pengujian otomatis alur ticketing.
 
 ### 2026-08-27
 

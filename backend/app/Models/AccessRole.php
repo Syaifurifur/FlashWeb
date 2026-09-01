@@ -15,6 +15,8 @@ class AccessRole extends Model
         'registrations.view' => 'Melihat data pendaftar',
         'registrations.review' => 'Memverifikasi dan memberi keputusan',
         'registrations.export' => 'Mengekspor data pendaftar',
+        'tickets.view' => 'Melihat data tiket supporter',
+        'tickets.review' => 'Memverifikasi pembayaran tiket supporter',
         'competitions.view' => 'Melihat manajemen lomba',
         'competitions.edit' => 'Mengubah lomba yang ditugaskan',
         'competitions.format' => 'Mengatur format peserta dan official',

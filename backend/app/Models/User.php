@@ -171,7 +171,7 @@ class User extends Authenticatable
     public function getPermissionsAttribute(): array
     {
         if ($this->role === 'super_admin') return array_keys(AccessRole::PERMISSIONS);
-        if (in_array($this->role, ['pic','spv'], true)) return ['dashboard.view','registrations.view','registrations.review','registrations.export','competitions.view','competitions.edit','competitions.format','notifications.manage','judging.manage','tournaments.manage'];
+        if (in_array($this->role, ['pic','spv'], true)) return ['dashboard.view','registrations.view','registrations.review','registrations.export','tickets.view','tickets.review','competitions.view','competitions.edit','competitions.format','notifications.manage','judging.manage','tournaments.manage'];
         if ($this->role === 'judge') return ['dashboard.view','judging.score'];
         return $this->accessRole?->permissions ?? [];
     }

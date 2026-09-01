@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\VenueController;
 use App\Http\Controllers\Api\CompetitionTypeController;
 use App\Http\Controllers\Api\EventEditionController;
 use App\Http\Controllers\Api\ScholarshipLoaController;
+use App\Http\Controllers\Api\SupporterTicketController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/competitions', [PublicController::class, 'competitions']);
@@ -32,6 +33,9 @@ Route::get('/content/data-consent', [ContentController::class, 'dataConsent']);
 Route::get('/content/general-documents', [ContentController::class, 'generalDocuments']);
 Route::get('/content/general-documents/{document}/download', [ContentController::class, 'downloadGeneralDocument'])->whereNumber('document');
 Route::post('/registrations', [PublicController::class, 'registerParticipant']);
+Route::get('/supporter-schools', [SupporterTicketController::class, 'schools']);
+Route::get('/supporter-ticket-settings', [SupporterTicketController::class, 'settings']);
+Route::post('/supporter-tickets', [SupporterTicketController::class, 'store']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/forgot-password', [PasswordResetController::class, 'forgot']);
 Route::post('/reset-password', [PasswordResetController::class, 'reset']);
@@ -70,6 +74,10 @@ Route::middleware('api.auth')->group(function () {
     Route::post('/manage/competitions/{competition}/downloadable-documents', [ManagementController::class, 'updateDownloadableDocuments'])->middleware('permission:competitions.edit,competitions.manage');
     Route::patch('/manage/competitions/{competition}/format', [ManagementController::class, 'updateFormat'])->middleware('permission:competitions.format');
     Route::get('/manage/registrations', [ManagementController::class, 'registrations'])->middleware('permission:registrations.view');
+    Route::get('/manage/supporter-tickets', [SupporterTicketController::class, 'index'])->middleware('permission:tickets.view');
+    Route::get('/manage/supporter-tickets/export', [SupporterTicketController::class, 'export'])->middleware('permission:tickets.view');
+    Route::patch('/manage/supporter-ticket-settings', [SupporterTicketController::class, 'updateSettings'])->middleware('permission:tickets.review');
+    Route::patch('/manage/supporter-tickets/{supporterTicket}/verification', [SupporterTicketController::class, 'verify'])->middleware('permission:tickets.review');
     Route::get('/manage/registration-competitions', [ManagementController::class, 'registrationCompetitions'])->middleware('permission:registrations.view');
     Route::get('/manage/registrations/export', [ManagementController::class, 'export'])->middleware('permission:registrations.export');
     Route::get('/manage/registrations/{registration}', [ManagementController::class, 'registration'])->middleware('permission:registrations.view');
