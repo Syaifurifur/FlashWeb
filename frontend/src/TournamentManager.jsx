@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ChevronDown, ChevronUp, Download, GripVertical, LockKeyhole, Play, Printer, ShieldAlert, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, ChevronDown, ChevronUp, GripVertical, LockKeyhole, Play, Printer, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api, STORAGE } from './api'
 import { VolleyballScoreEditor } from './VolleyballScore'
@@ -61,6 +61,7 @@ function MatchEditor({match, reload, drawingLocked, volleyball = false}) {
   const [busy, setBusy] = useState(false)
   const participantsReady = Boolean(match.participant_a_id && match.participant_b_id)
   const finalStatus = ['bye', 'walkover', 'cancelled'].includes(match.status)
+  const byeParticipant = match.winner || match.participant_a || match.participant_b
   const canOperate = drawingLocked && participantsReady && !finalStatus
   const scoreReady = scoreA !== '' && scoreB !== ''
   const setSummary = volleyballSummary(bestOf, setScores)
@@ -102,7 +103,8 @@ function MatchEditor({match, reload, drawingLocked, volleyball = false}) {
     {volleyball && participantsReady && <div className="mt-3 grid gap-2 rounded-xl border bg-slate-50 p-3 sm:grid-cols-2"><ParticipantIdentity participant={match.participant_a} winner={match.winner_id === match.participant_a_id} showSchool/><ParticipantIdentity participant={match.participant_b} winner={match.winner_id === match.participant_b_id} showSchool/></div>}
     {volleyball && participantsReady && <VolleyballScoreEditor bestOf={bestOf} onBestOfChange={setBestOf} scores={setScores} onScoresChange={setSetScores} participantA={nameOf(match.participant_a)} participantB={nameOf(match.participant_b)} chooseFormat={!['ongoing','completed'].includes(match.status)} disabled={!canOperate} scoresDisabled={!['ongoing','completed'].includes(match.status)}/>}
     {!drawingLocked && <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs font-bold text-amber-800">Kunci drawing terlebih dahulu untuk menjalankan pertandingan.</p>}
-    {drawingLocked && !participantsReady && <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs font-bold text-slate-500">Menunggu peserta dari pertandingan sebelumnya.</p>}
+    {match.status === 'bye' && <p className="mt-3 rounded-xl bg-emerald-50 p-3 text-xs font-bold text-emerald-700">{nameOf(byeParticipant)} lolos otomatis ke babak berikutnya karena mendapat BYE.</p>}
+    {drawingLocked && !participantsReady && match.status !== 'bye' && <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs font-bold text-slate-500">Menunggu peserta dari pertandingan sebelumnya.</p>}
     {canOperate && <div className="mt-3 grid gap-2 sm:flex sm:justify-end">
       {!['ongoing','completed'].includes(match.status) && <button className="btn-primary py-2 text-xs" disabled={busy} onClick={() => save('ongoing')}><Play size={14}/>Mulai Pertandingan</button>}
       {match.status === 'ongoing' && <><button className="btn-ghost py-2 text-xs" disabled={busy || (!volleyball && !scoreReady)} onClick={() => save('ongoing', true)}>Simpan Skor</button><button className="btn-dark py-2 text-xs" disabled={busy || (volleyball ? !setSummary.decided : !scoreReady)} onClick={() => save('completed', true)}>Selesaikan</button></>}
@@ -310,15 +312,6 @@ export function TournamentManager() {
       // Kesalahan API sudah ditampilkan oleh pusat pesan aplikasi.
     }
   }
-  const download = () => {
-    const blob = new Blob([JSON.stringify(data.draw, null, 2)], {type: 'application/json'})
-    const url = URL.createObjectURL(blob), anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = `drawing-${data.competition.slug}-v${data.draw.version}.json`
-    anchor.click()
-    URL.revokeObjectURL(url)
-  }
-
   const locked = data.draw?.status === 'locked'
   const forceAudit = data.draw?.settings?.force_majeure
   const forceAuditIds = forceAudit?.registration_ids || []
@@ -344,7 +337,7 @@ export function TournamentManager() {
     </section>}
 
     {data.draw && <>
-      <section className="mt-6 rounded-3xl bg-white p-4 sm:p-7"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="text-xs font-bold uppercase tracking-wider text-blue-600">Hasil Drawing · Versi {data.draw.version}</div><h2 className="mt-1 font-display text-2xl font-bold">{formatLabels[data.draw.format]}</h2><p className="mt-1 text-xs text-slate-400">{dateTime(data.draw.drawn_at)} · Operator {data.draw.operator?.name}</p></div><div className="grid w-full gap-2 sm:flex sm:w-auto sm:flex-wrap"><button className="btn-ghost" onClick={download}><Download size={15}/>Unduh</button>{['single_elimination', 'groups_knockout'].includes(data.draw.format) ? <Link className="btn-ghost" target="_blank" to={`/panel/drawing/cetak/${data.competition.id}/${data.session?.id || 0}`}><Printer size={15}/>Cetak Bagan</Link> : <button className="btn-ghost" onClick={() => window.print()}><Printer size={15}/>Cetak</button>}{!locked && <button className="btn-dark" onClick={lock}><LockKeyhole size={15}/>Kunci Drawing</button>}{locked && data.can_unlock && <button className="btn-ghost border-amber-300 text-amber-700" onClick={unlock}><LockKeyhole size={15}/>Buka Kunci</button>}{locked && !data.can_unlock && <span className="rounded-xl bg-slate-100 px-4 py-3 text-xs font-bold text-slate-500"><LockKeyhole className="mr-1 inline" size={14}/>Drawing terkunci</span>}</div></div>
+      <section className="mt-6 rounded-3xl bg-white p-4 sm:p-7"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="text-xs font-bold uppercase tracking-wider text-blue-600">Hasil Drawing · Versi {data.draw.version}</div><h2 className="mt-1 font-display text-2xl font-bold">{formatLabels[data.draw.format]}</h2><p className="mt-1 text-xs text-slate-400">{dateTime(data.draw.drawn_at)} · Operator {data.draw.operator?.name}</p></div><div className="grid w-full gap-2 sm:flex sm:w-auto sm:flex-wrap">{['single_elimination', 'groups_knockout'].includes(data.draw.format) ? <Link className="btn-ghost" target="_blank" to={`/panel/drawing/cetak/${data.competition.id}/${data.session?.id || 0}`}><Printer size={15}/>Cetak Bagan</Link> : <button className="btn-ghost" onClick={() => window.print()}><Printer size={15}/>Cetak</button>}{!locked && <button className="btn-dark" onClick={lock}><LockKeyhole size={15}/>Kunci Drawing</button>}{locked && data.can_unlock && <button className="btn-ghost border-amber-300 text-amber-700" onClick={unlock}><LockKeyhole size={15}/>Buka Kunci</button>}{locked && !data.can_unlock && <span className="rounded-xl bg-slate-100 px-4 py-3 text-xs font-bold text-slate-500"><LockKeyhole className="mr-1 inline" size={14}/>Drawing terkunci</span>}</div></div>
         {forceAudit && <div className="mt-5 rounded-2xl border border-amber-300 bg-amber-50 p-4"><div className="flex items-center gap-2 font-display font-bold text-amber-950"><AlertTriangle size={18}/>Audit force majeure</div><p className="mt-2 text-sm leading-6 text-amber-900">{forceAudit.reason}</p><p className="mt-2 text-xs font-bold text-amber-700">Disetujui {forceAudit.approved_by?.name} · {dateTime(forceAudit.approved_at)} · {forceAudit.teams?.length || 0} tim</p></div>}
         <div className="mt-6 grid gap-2 sm:grid-cols-2">{data.draw.entries.slice(0, reveal).map(entry => <div key={entry.id} className={`rounded-xl border p-3 ${forceAuditIds.includes(entry.registration_id) ? 'border-amber-300 bg-amber-50' : ''}`}><span className="mr-3 inline-grid size-7 place-items-center rounded-full bg-blue-600 text-xs font-bold text-white">{entry.slot_number}</span><b>{entry.is_bye ? 'BYE' : nameOf(entry.registration)}</b>{forceAuditIds.includes(entry.registration_id) && <span className="ml-2 rounded-full bg-amber-200 px-2 py-1 text-[10px] font-black uppercase text-amber-800">Force majeure</span>}<span className="ml-2 text-xs text-slate-400">{entry.group_name || entry.registration?.school_name}</span></div>)}</div>
       </section>

@@ -9,6 +9,7 @@ use App\Models\RegistrationMember;
 use App\Models\RegistrationOfficial;
 use App\Models\TournamentDraw;
 use App\Models\User;
+use App\Support\TournamentBracketResolver;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -34,7 +35,6 @@ class VolleyballDemoSeeder extends Seeder
             ['Bintang Pertiwi', 'SMAN 9 Bogor'],
             ['Vokasi Angels', 'SMKN 2 Bogor'],
             ['Kesatuan Phoenix', 'SMA Kesatuan Bogor'],
-            ['Mandiri Volley Girls', 'SMA Mandiri Bogor'],
         ],
     ];
 
@@ -105,26 +105,37 @@ class VolleyballDemoSeeder extends Seeder
                 }
                 $draw->entries()->delete();
                 $draw->matches()->delete();
+                $prefix = $slug === 'bola-voli-putra' ? 'VP' : 'VW';
+                Registration::where('competition_id', $competition->id)
+                    ->where('competition_session_id', $session->id)
+                    ->where('ticket_code', 'like', "DEMO-{$prefix}-BGR-%")
+                    ->whereNotIn('id', $registrations->pluck('id'))
+                    ->delete();
                 $draw->update([
                     'operator_id'=>$admin->id,'mode'=>'manual','format'=>'single_elimination',
-                    'settings'=>['third_place'=>true,'demo_seed'=>'volleyball','description'=>'Dummy alur skor set voli'],
+                    'settings'=>['third_place'=>true,'demo_seed'=>'volleyball','description'=>'Dummy alur skor set voli termasuk contoh BYE'],
                     'status'=>'locked','drawn_at'=>now(),'locked_at'=>now(),
                 ]);
-                foreach ($registrations as $index => $registration) $draw->entries()->create([
-                    'registration_id'=>$registration->id,'slot_number'=>$index + 1,'is_bye'=>false,
+                $slots = $registrations->values()->all();
+                while (count($slots) < 8) $slots[] = null;
+                foreach ($slots as $index => $registration) $draw->entries()->create([
+                    'registration_id'=>$registration?->id,'slot_number'=>$index + 1,'is_bye'=>! $registration,
                 ]);
 
                 $venue = $session->schedule_venues[0] ?? $session->venue ?? 'Lapangan Voli';
                 $quarterfinals = [];
                 foreach (range(0, 3) as $index) {
-                    $participantA = $registrations[$index * 2];
-                    $participantB = $registrations[$index * 2 + 1];
+                    $participantA = $slots[$index * 2];
+                    $participantB = $slots[$index * 2 + 1];
                     $attributes = [
                         'stage'=>'main','round_number'=>1,'round_label'=>'Quarterfinal','match_number'=>$index + 1,
-                        'participant_a_id'=>$participantA->id,'participant_b_id'=>$participantB->id,
+                        'participant_a_id'=>$participantA?->id,'participant_b_id'=>$participantB?->id,
                         'duration_minutes'=>90,
                     ];
-                    if ($index === 0) $attributes += [
+                    if (! $participantA || ! $participantB) $attributes += [
+                        'status'=>'bye','winner_id'=>$participantA?->id ?: $participantB?->id,
+                    ];
+                    elseif ($index === 0) $attributes += [
                         'status'=>'completed','scheduled_at'=>now()->subHours(2),'venue'=>$venue,
                         'best_of_sets'=>3,'set_scores'=>[
                             ['score_a'=>25,'score_b'=>18,'completed'=>true],
@@ -166,7 +177,10 @@ class VolleyballDemoSeeder extends Seeder
                     'source_b_match_id'=>$semifinalTwo->id,'source_b_outcome'=>'loser','status'=>'unscheduled','duration_minutes'=>90,
                 ]);
 
-                $this->command?->info("{$competition->title}: 8 tim dan 8 pertandingan dummy siap di {$session->city}.");
+                app(TournamentBracketResolver::class)->repairDraw($draw);
+
+                $byeCount = collect($slots)->filter(fn ($slot) => $slot === null)->count();
+                $this->command?->info("{$competition->title}: {$registrations->count()} tim, {$byeCount} BYE, dan 8 pertandingan dummy siap di {$session->city}.");
             });
         }
     }

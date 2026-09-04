@@ -39,7 +39,7 @@ function MatchCard({match, onClick, onStart, onFinish, busy = false}) {
   const final = ['walkover', 'bye', 'cancelled'].includes(match.status)
   const earlyStart = match.status !== 'ongoing' && isScheduledLater(match.scheduled_at)
   return <article className="w-full overflow-hidden rounded-xl border bg-white shadow-sm transition hover:border-blue-400">
-    <button type="button" onClick={onClick} className="w-full cursor-grab p-3 text-left">
+    <button type="button" onClick={onClick} disabled={match.status === 'bye'} className={`w-full p-3 text-left ${match.status === 'bye' ? 'cursor-default' : 'cursor-grab'}`}>
       <div className="flex items-center justify-between gap-2"><b className="text-[11px] text-blue-600">MATCH {pad(match.match_number)} · {match.round_label}</b><GripVertical size={14} className="text-slate-300"/></div>
       <div className="mt-1 truncate text-xs font-bold">{nameOf(match.participant_a)} vs {nameOf(match.participant_b)}</div>
       <span className={`mt-2 inline-block rounded-full px-2 py-1 text-[10px] font-bold ${colors[match.status]}`}>{labels[match.status] || match.status}</span>
@@ -135,7 +135,7 @@ export function ScheduleManager() {
   if (!data.competition) return <div className="rounded-3xl bg-white p-10 text-center">Belum ada lomba yang dapat dijadwalkan.</div>
 
   const scheduled = data.matches.filter(match => dateKey(match.scheduled_at) === day)
-  const unscheduled = data.matches.filter(match => !match.scheduled_at || match.status === 'unscheduled')
+  const unscheduled = data.matches.filter(match => match.status !== 'bye' && (!match.scheduled_at || match.status === 'unscheduled'))
   const timelineSlots = [...new Set([
     ...slots,
     ...scheduled.map(match => timeKey(match.scheduled_at)),
@@ -154,7 +154,7 @@ export function ScheduleManager() {
     finally { setQuickBusy(null) }
   }
   const finishMatch = match => setSelected({match, initialStatus:'completed'})
-  const drop = async (venue, time) => { if (!dragged) return; const match = data.matches.find(item => item.id === dragged); setDragged(null); try { await update(match, {scheduled_at:`${day}T${time.replace(' WIB', '')}`, venue, status:'upcoming', notify:notifyDrag}) } catch (error) { alert(error.message) } }
+  const drop = async (venue, time) => { if (!dragged) return; const match = data.matches.find(item => item.id === dragged); setDragged(null); if (!match || match.status === 'bye') return; try { await update(match, {scheduled_at:`${day}T${time.replace(' WIB', '')}`, venue, status:'upcoming', notify:notifyDrag}) } catch (error) { alert(error.message) } }
   const saveVenues = async () => { const venues = venuesText.split(',').map(value => value.trim()).filter(Boolean); try { const value = await api(`/manage/schedules/competitions/${data.competition.id}/venues`, {method:'PUT', body:JSON.stringify({competition_session_id:data.session?.id || null, venues})}); setData({...data, ...value}); setVenuesText(value.competition.venues.join(', ')) } catch (error) { alert(error.message) } }
   const addBlock = async () => { const payload={...block, competition_session_id:data.session?.id || null, duration_minutes:Number(block.duration_minutes)}; try { const value = await api(`/manage/schedules/competitions/${data.competition.id}/blocks`, {method:'POST', body:JSON.stringify(payload)}); setData({...data, ...value}) } catch (error) { if (error.conflicts?.length && confirm(`${error.conflicts.join('\n')}\nTetap tambahkan?`)) { const value = await api(`/manage/schedules/competitions/${data.competition.id}/blocks`, {method:'POST', body:JSON.stringify({...payload, force:true})}); setData({...data, ...value}) } else alert(error.message) } }
   const deleteBlock = async id => { const value = await api(`/manage/schedules/blocks/${id}`, {method:'DELETE'}); setData({...data, ...value}) }

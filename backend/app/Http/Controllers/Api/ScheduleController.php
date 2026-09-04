@@ -12,6 +12,7 @@ use App\Models\TournamentScheduleBlock;
 use App\Models\EventEdition;
 use App\Models\CompetitionResult;
 use App\Support\VolleyballScoring;
+use App\Support\TournamentBracketResolver;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -94,6 +95,7 @@ class ScheduleController extends Controller
 
     private function payload(Competition $competition, ?CompetitionSession $session, ?TournamentDraw $draw): array
     {
+        if ($draw) app(TournamentBracketResolver::class)->repairDraw($draw);
         $matches = $draw ? $this->matchQuery($draw)->get() : collect();
         $blocks = $competition->scheduleBlocks()->where('competition_session_id', $session?->id)->when($draw, fn ($query) => $query->where(function ($q) use ($draw) {
             $q->whereNull('tournament_draw_id')->orWhere('tournament_draw_id', $draw->id);
@@ -278,6 +280,9 @@ class ScheduleController extends Controller
         $this->authorizeCompetition($request, $competition);
         $session = $match->tournamentDraw->competitionSession;
         if($session)abort_unless($this->accessibleSessions($request,$competition)->whereKey($session->id)->exists(),403);
+        app(TournamentBracketResolver::class)->resolveMatch($match);
+        $match->refresh();
+        abort_if($match->status === 'bye', 422, 'Pertandingan BYE selesai otomatis dan tidak dapat diubah atau dijadwalkan.');
         $data = $request->validate([
             'scheduled_at' => 'nullable|date', 'venue' => 'nullable|string|max:160',
             'duration_minutes' => 'required|integer|min:5|max:720',

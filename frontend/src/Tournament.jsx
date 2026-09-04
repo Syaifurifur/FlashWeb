@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Download, GripVertical, LockKeyhole, Play, Printer, ShieldCheck, Trophy } from 'lucide-react'
+import { GripVertical, LockKeyhole, Play, Printer, ShieldCheck, Trophy } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 import { api, STORAGE } from './api'
 
@@ -261,17 +261,6 @@ export function TournamentManager() {
       alert(e.message)
     }
   }
-  const download = () => {
-    const blob = new Blob([JSON.stringify(data.draw, null, 2)], {
-        type: 'application/json',
-      }),
-      url = URL.createObjectURL(blob),
-      anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = `drawing-${data.competition.slug}-v${data.draw.version}.json`
-    anchor.click()
-    URL.revokeObjectURL(url)
-  }
   const toggle = (setter, values, id) => setter(values.includes(id) ? values.filter((x) => x !== id) : [...values, id])
   const drop = (id) => {
     if (dragged === null || dragged === id) return
@@ -409,10 +398,6 @@ export function TournamentManager() {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button className="btn-ghost" onClick={download}>
-                  <Download size={15} />
-                  Unduh
-                </button>
                 <button className="btn-ghost" onClick={() => window.print()}>
                   <Printer size={15} />
                   Cetak

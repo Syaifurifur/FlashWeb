@@ -11,6 +11,7 @@ use App\Models\TournamentMatch;
 use App\Models\EventEdition;
 use App\Models\CompetitionResult;
 use App\Support\VolleyballScoring;
+use App\Support\TournamentBracketResolver;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -124,6 +125,8 @@ class TournamentController extends Controller
 
     private function drawPayload(TournamentDraw $draw): TournamentDraw
     {
+        app(TournamentBracketResolver::class)->repairDraw($draw);
+        $draw->refresh();
         $draw->load([
             'operator:id,name','competition:id,title,slug,category',
             'competitionSession:id,competition_id,venue_id,city,venue,competition_start_date,competition_end_date,schedule_venues',
@@ -419,6 +422,9 @@ class TournamentController extends Controller
     public function updateMatch(Request $request,TournamentMatch $match)
     {
         $this->authorizeDraw($request,$match->tournamentDraw);
+        app(TournamentBracketResolver::class)->resolveMatch($match);
+        $match->refresh();
+        abort_if($match->status === 'bye', 422, 'Pertandingan BYE selesai otomatis dan tidak dapat diubah atau dijadwalkan.');
         $data=$request->validate([
             'score_a'=>'nullable|numeric|min:0','score_b'=>'nullable|numeric|min:0',
             'best_of_sets'=>'nullable|integer|in:1,3,5','set_scores'=>'nullable|array|max:5',
@@ -465,15 +471,12 @@ class TournamentController extends Controller
 
     public function resolveDependents(TournamentMatch $source): void
     {
-        TournamentMatch::where('source_a_match_id',$source->id)->orWhere('source_b_match_id',$source->id)->get()->each(fn($match)=>$this->resolveMatch($match));
+        app(TournamentBracketResolver::class)->resolveDependents($source);
     }
 
     public function resolveMatch(TournamentMatch $match): void
     {
-        foreach(['a','b'] as $slot){$sourceId=$match->{'source_'.$slot.'_match_id'};if(!$sourceId)continue;$source=TournamentMatch::find($sourceId);if(!in_array($source?->status,['completed','bye'],true))return;$outcome=$match->{'source_'.$slot.'_outcome'};$participant=$outcome==='winner'?$source->winner_id:($source->winner_id===$source->participant_a_id?$source->participant_b_id:$source->participant_a_id);$match->{'participant_'.$slot.'_id'}=$participant;}
-        $match->save();
-        $sourcesResolved=(!$match->source_a_match_id||in_array(TournamentMatch::find($match->source_a_match_id)?->status,['completed','bye'],true))&&(!$match->source_b_match_id||in_array(TournamentMatch::find($match->source_b_match_id)?->status,['completed','bye'],true));
-        if($sourcesResolved&&(!$match->participant_a_id||!$match->participant_b_id)){$match->winner_id=$match->participant_a_id?:$match->participant_b_id;$match->status='bye';$match->save();$this->resolveDependents($match);}
+        app(TournamentBracketResolver::class)->resolveMatch($match);
     }
 
     public function lock(Request $request,TournamentDraw $draw)

@@ -53,6 +53,14 @@ Setiap perubahan fitur, skema database, API, hak akses, atau alur pengguna wajib
 
 ## Changelog
 
+### 2026-09-05
+
+- Memperbaiki pertandingan BYE pada bagan eliminasi agar tim langsung tersimpan sebagai pemenang otomatis, diteruskan ke ronde berikutnya meskipun lawan dari cabang lain belum diketahui, dan data bagan lama yang telanjur berubah menjadi jadwal biasa dipulihkan otomatis saat dimuat.
+- Mencegah slot BYE dijadwalkan, diseret, atau diubah statusnya dari panel jadwal; menambahkan penjelasan tim yang lolos otomatis pada panel bagan serta dukungan propagasi hasil walkover.
+- Menyesuaikan dummy BOLA VOLI PUTRI menjadi tujuh tim dalam bracket delapan slot agar tersedia satu contoh BYE yang dapat langsung diuji di lingkungan lokal.
+- Menghapus tombol ekspor JSON `Unduh` dari panel Drawing & Bagan karena keluaran resmi sudah tersedia melalui tombol Cetak Bagan.
+- Menambahkan pilihan kelas `Lainnya` pada formulir tiket supporter yang membuka pilihan lanjutan `Umum` atau `Orang Tua`, termasuk validasi, penyimpanan, tampilan admin, dan ekspor XLSX.
+
 ### 2026-09-01
 
 - Menambahkan formulir publik tiket supporter berisi nama, kelas, asal sekolah dengan rekomendasi dari database peserta, jenis kelamin, email, nomor telepon, dan minat kuliah tahun ini.

@@ -39,7 +39,9 @@ class RegistrationExcelExporter
             $ticket->ticket_code,
             match($ticket->status){'verified'=>'Terverifikasi','rejected'=>'Ditolak',default=>'Menunggu'},
             $ticket->full_name,
-            $ticket->grade,
+            $ticket->grade === 'other'
+                ? 'Lainnya - '.($ticket->supporter_category === 'parent' ? 'Orang Tua' : 'Umum')
+                : $ticket->grade,
             $ticket->school_name,
             $ticket->venue?->name ?: 'Belum ditentukan',
             $ticket->venue?->city ?: '-',

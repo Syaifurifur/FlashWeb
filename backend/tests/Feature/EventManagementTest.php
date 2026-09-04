@@ -440,6 +440,63 @@ class EventManagementTest extends TestCase
         ])->assertCreated()->assertJsonPath('version',3);
     }
 
+    public function test_bye_is_preserved_repaired_and_propagated_to_the_next_round(): void
+    {
+        $competition = $this->competition();
+        User::create([
+            'name'=>'Admin BYE', 'email'=>'admin-bye@test.id', 'password'=>'password123',
+            'role'=>'super_admin', 'api_token'=>hash('sha256', 'admin-bye-token'),
+        ]);
+        $registrations = collect();
+        foreach (range(1, 3) as $number) $registrations->push(Registration::create([
+            'competition_id'=>$competition->id, 'ticket_code'=>'BYE-'.$number, 'full_name'=>'Tim BYE '.$number,
+            'whatsapp'=>'08125555000'.$number, 'email'=>'bye'.$number.'@test.id', 'birth_place'=>'Bogor', 'birth_date'=>'2009-01-01',
+            'grade'=>'XI', 'nisn'=>(string)(7600000000+$number), 'mother_name'=>'Ibu', 'school_name'=>'Sekolah BYE '.$number,
+            'teacher_name'=>'Guru', 'teacher_contact'=>'081298765432', 'student_card_path'=>'a.pdf', 'delegation_letter_path'=>'b.pdf',
+            'photo_path'=>'c.jpg', 'consent'=>true, 'status'=>'approved',
+        ]));
+
+        $ids = $registrations->pluck('id')->all();
+        $draw = $this->withToken('admin-bye-token')->postJson('/api/manage/tournaments/competitions/'.$competition->id.'/draw', [
+            'mode'=>'manual', 'format'=>'single_elimination', 'manual_slots'=>[$ids[0], null, $ids[1], $ids[2]],
+        ])->assertCreated();
+
+        $bye = TournamentMatch::where('tournament_draw_id', $draw->json('id'))->where('match_number', 1)->firstOrFail();
+        $playable = TournamentMatch::where('tournament_draw_id', $draw->json('id'))->where('match_number', 2)->firstOrFail();
+        $next = TournamentMatch::where('tournament_draw_id', $draw->json('id'))->where('match_number', 3)->firstOrFail();
+        $this->assertSame('bye', $bye->status);
+        $this->assertSame($ids[0], $bye->winner_id);
+        $this->assertSame($ids[0], $next->participant_a_id);
+        $this->assertNull($next->participant_b_id);
+
+        // Simulasikan data lama yang rusak ketika match BYE sempat dijadwalkan.
+        $bye->update([
+            'status'=>'upcoming', 'winner_id'=>null, 'scheduled_at'=>'2031-09-01 01:00:00', 'venue'=>'Lapangan 1',
+        ]);
+        $next->update(['participant_a_id'=>null]);
+
+        $this->withToken('admin-bye-token')->putJson('/api/manage/schedules/matches/'.$bye->id, [
+            'status'=>'upcoming', 'duration_minutes'=>60,
+        ])->assertUnprocessable()
+            ->assertJsonPath('message', 'Pertandingan BYE selesai otomatis dan tidak dapat diubah atau dijadwalkan.');
+
+        $this->withToken('admin-bye-token')->getJson('/api/manage/tournaments?competition_id='.$competition->id)
+            ->assertOk()
+            ->assertJsonFragment(['id'=>$bye->id, 'status'=>'bye', 'winner_id'=>$ids[0]])
+            ->assertJsonFragment(['id'=>$next->id, 'participant_a_id'=>$ids[0]]);
+        $this->assertDatabaseHas('tournament_matches', [
+            'id'=>$bye->id, 'status'=>'bye', 'winner_id'=>$ids[0], 'scheduled_at'=>null, 'venue'=>null,
+        ]);
+
+        $winner = $playable->participant_a_id;
+        $this->withToken('admin-bye-token')->putJson('/api/manage/tournaments/matches/'.$playable->id, [
+            'score_a'=>2, 'score_b'=>0, 'status'=>'completed',
+        ])->assertOk();
+        $next->refresh();
+        $this->assertSame($ids[0], $next->participant_a_id);
+        $this->assertSame($winner, $next->participant_b_id);
+    }
+
     public function test_double_elimination_and_group_knockout_generation(): void
     {
         $competition=$this->competition();

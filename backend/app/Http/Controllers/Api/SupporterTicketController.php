@@ -63,7 +63,8 @@ class SupporterTicketController extends Controller
         $data = $request->validate([
             'competition_venue_id' => ['required', 'integer', Rule::exists('competition_venues', 'id')->where(fn ($query) => $query->where('event_edition_id', $editionId)->where('is_active', true))],
             'full_name' => 'required|string|max:120',
-            'grade' => 'required|in:X,XI,XII',
+            'grade' => 'required|in:X,XI,XII,other',
+            'supporter_category' => 'nullable|required_if:grade,other|in:general,parent',
             'school_name' => 'required|string|max:180',
             'gender' => 'required|in:male,female',
             'email' => 'required|email|max:150',
@@ -80,6 +81,7 @@ class SupporterTicketController extends Controller
 
         return DB::transaction(function () use ($request, $data, $edition, $editionId) {
             unset($data['payment_proof']);
+            if ($data['grade'] !== 'other') $data['supporter_category'] = null;
             if ($request->hasFile('payment_proof')) {
                 $data['payment_proof_path'] = $request->file('payment_proof')->store('supporter-tickets', 'public');
             }
@@ -99,6 +101,8 @@ class SupporterTicketController extends Controller
                 'status' => $ticket->status,
                 'payment_method' => $ticket->payment_method,
                 'ticket_price' => $ticket->ticket_price,
+                'grade' => $ticket->grade,
+                'supporter_category' => $ticket->supporter_category,
                 'venue' => $ticket->venue()->first(['id', 'name', 'city']),
             ], 201);
         });

@@ -152,6 +152,27 @@ class SupporterTicketTest extends TestCase
         Storage::disk('public')->assertExists($ticket->payment_proof_path);
     }
 
+    public function test_other_grade_requires_and_stores_supporter_category(): void
+    {
+        $this->post('/api/supporter-tickets', $this->validPayload(['grade' => 'other']))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('supporter_category');
+
+        $response = $this->post('/api/supporter-tickets', $this->validPayload([
+            'grade' => 'other',
+            'supporter_category' => 'parent',
+        ]));
+
+        $response->assertCreated()
+            ->assertJsonPath('grade', 'other')
+            ->assertJsonPath('supporter_category', 'parent');
+        $this->assertDatabaseHas('supporter_tickets', [
+            'email' => 'supporter@test.id',
+            'grade' => 'other',
+            'supporter_category' => 'parent',
+        ]);
+    }
+
     public function test_admin_can_update_public_ticket_price_and_transfer_information(): void
     {
         $admin = User::create([
