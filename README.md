@@ -53,6 +53,14 @@ Setiap perubahan fitur, skema database, API, hak akses, atau alur pengguna wajib
 
 ## Changelog
 
+### 2026-09-08
+
+- Menambahkan `FutsalGroupKnockoutDemoSeeder`: versi simulasi baru FUTSAL PUTRA Bogor dengan 16 tim, 4 grup, 24 laga grup selesai, dan bagan 8 tim knockout belum dimulai agar drawing ulang otomatis/manual dapat dicoba. Jalankan dari `backend` dengan `php artisan db:seed --class=FutsalGroupKnockoutDemoSeeder`; membutuhkan 16 peserta `FutsalDemoSeeder` dan mempertahankan versi drawing sebelumnya.
+
+- Menambahkan Drawing Ulang Knockout otomatis/manual sebelum pertandingan dimulai atau memiliki hasil, dengan pengecualian BYE otomatis. Pengulangan mengganti bagan/jadwal knockout dan juara ketiga secara atomik, mempertahankan fase grup, menyimpan riwayat versi/operator, serta menolak permintaan dari versi bagan lama.
+
+- Menambahkan pilihan drawing knockout otomatis dan penempatan manual oleh panitia setelah seluruh laga grup selesai. Otomatis mengundi juara grup melawan peringkat 2 grup lain; manual hanya menerima seluruh tim peringkat 1 dan 2 tepat satu kali, dengan validasi BYE dan pencatatan operator/metode.
+
 ### 2026-09-05
 
 - Memperbaiki pertandingan BYE pada bagan eliminasi agar tim langsung tersimpan sebagai pemenang otomatis, diteruskan ke ronde berikutnya meskipun lawan dari cabang lain belum diketahui, dan data bagan lama yang telanjur berubah menjadi jadwal biasa dipulihkan otomatis saat dimuat.

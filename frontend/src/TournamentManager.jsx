@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, ChevronDown, ChevronUp, GripVertical, LockKeyhole, Play, Printer, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api, STORAGE } from './api'
+import { KnockoutDrawing } from './KnockoutDrawing'
 import { VolleyballScoreEditor } from './VolleyballScore'
 import { normalizeVolleyballSets, volleyballSummary } from './volleyball-score-utils'
 
@@ -342,7 +343,8 @@ export function TournamentManager() {
         <div className="mt-6 grid gap-2 sm:grid-cols-2">{data.draw.entries.slice(0, reveal).map(entry => <div key={entry.id} className={`rounded-xl border p-3 ${forceAuditIds.includes(entry.registration_id) ? 'border-amber-300 bg-amber-50' : ''}`}><span className="mr-3 inline-grid size-7 place-items-center rounded-full bg-blue-600 text-xs font-bold text-white">{entry.slot_number}</span><b>{entry.is_bye ? 'BYE' : nameOf(entry.registration)}</b>{forceAuditIds.includes(entry.registration_id) && <span className="ml-2 rounded-full bg-amber-200 px-2 py-1 text-[10px] font-black uppercase text-amber-800">Force majeure</span>}<span className="ml-2 text-xs text-slate-400">{entry.group_name || entry.registration?.school_name}</span></div>)}</div>
       </section>
       <GroupStandings groups={data.draw.group_standings} volleyball={data.competition.scoring_mode === 'volleyball_sets'}/>
-      <section className="mt-6"><div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><h2 className="font-display text-2xl font-bold">Bagan Pertandingan</h2><p className="mt-1 text-sm text-slate-500">Mulai pertandingan, simpan skor berjalan, dan selesaikan laga langsung dari bagan tanpa membuka menu Jadwal.</p></div>{data.draw.format === 'groups_knockout' && !data.draw.matches.some(match => match.stage === 'knockout') && <button className="btn-dark" onClick={async () => {try {await api(`/manage/tournaments/draws/${data.draw.id}/knockout`, {method: 'POST'}); reload()} catch { /* Pusat pesan aplikasi menampilkan kesalahan. */ }}}>Buat Babak Knockout</button>}</div><div className="grid gap-5 xl:grid-cols-2">{data.draw.matches.map(match => <MatchEditor key={match.id} match={match} reload={reload} drawingLocked={locked} volleyball={data.competition.scoring_mode === 'volleyball_sets'}/>)}</div></section>
+      {data.draw.format === 'groups_knockout' && <KnockoutDrawing key={`${data.draw.id}-${data.draw.settings?.knockout?.version || 0}-${JSON.stringify(data.draw.group_standings)}`} draw={data.draw} reload={reload}/>}
+      <section className="mt-6"><div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><h2 className="font-display text-2xl font-bold">Bagan Pertandingan</h2><p className="mt-1 text-sm text-slate-500">Mulai pertandingan, simpan skor berjalan, dan selesaikan laga langsung dari bagan tanpa membuka menu Jadwal.</p></div></div><div className="grid gap-5 xl:grid-cols-2">{data.draw.matches.map(match => <MatchEditor key={match.id} match={match} reload={reload} drawingLocked={locked} volleyball={data.competition.scoring_mode === 'volleyball_sets'}/>)}</div></section>
       <section className="mt-6 rounded-3xl bg-white p-5"><h2 className="font-display font-bold">Riwayat Drawing Ulang</h2><div className="mt-3 flex flex-wrap gap-2">{data.history.map(item => <span key={item.id} className="rounded-full bg-slate-100 px-3 py-2 text-xs font-bold">Versi {item.version} · {item.mode} · {dateTime(item.drawn_at)} · {item.status}</span>)}</div></section>
     </>}
   </div>

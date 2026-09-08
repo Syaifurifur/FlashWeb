@@ -140,6 +140,9 @@ class TournamentController extends Controller
         $draw->competition->setAttribute('scoring_mode', VolleyballScoring::mode($draw->competition));
 
         $draw->setAttribute('group_standings', $this->groupStandings($draw));
+        $knockoutMatches = $draw->matches->whereIn('stage', ['knockout', 'third_place']);
+        $draw->setAttribute('can_redraw_knockout', $draw->format === 'groups_knockout' && $knockoutMatches->isNotEmpty()
+            && empty($draw->settings['knockout_started_at']) && !$knockoutMatches->contains(fn ($match) => $match->hasPlayEvidence()));
         return $draw;
     }
 
@@ -504,13 +507,76 @@ class TournamentController extends Controller
     public function generateKnockout(Request $request,TournamentDraw $draw)
     {
         $this->authorizeDraw($request,$draw);
-        abort_unless($draw->format==='groups_knockout',422,'Format drawing ini bukan grup dilanjutkan knockout.');
-        abort_if($draw->matches()->where('stage','knockout')->exists(),422,'Babak knockout sudah dibuat.');
-        $groupMatches=$draw->matches()->where('stage','group')->get();
-        abort_if($groupMatches->isEmpty()||$groupMatches->contains(fn($m)=>$m->status!=='completed'),422,'Selesaikan seluruh pertandingan grup terlebih dahulu.');
-        $qualifiers=collect($this->groupStandings($draw))->flatMap(fn($group)=>collect($group['rows'])->take(2)->pluck('registration_id'))->all();
-        $participants=Registration::whereIn('id',$qualifiers)->get()->keyBy('id');$ordered=collect($qualifiers)->map(fn($id)=>$participants[$id]);$size=2;while($size<$ordered->count())$size*=2;$slots=array_pad($ordered->all(),$size,null);
-        $this->createEliminationMatches($draw,$slots,['third_place'=>$draw->settings['third_place']??false],false,'knockout',(int)$draw->matches()->max('match_number')+1);
+        $data = $request->validate([
+            'mode' => 'sometimes|required|in:random,manual',
+            'manual_slots' => 'required_if:mode,manual|array|max:64',
+            'manual_slots.*' => 'nullable|integer',
+            'redraw' => 'sometimes|boolean',
+            'knockout_version' => 'required_if:redraw,true|integer|min:1',
+        ]);
+        DB::transaction(function () use ($request, $draw, $data) {
+            $draw = TournamentDraw::whereKey($draw->id)->lockForUpdate()->firstOrFail();
+            abort_unless($draw->format === 'groups_knockout', 422, 'Format drawing ini bukan grup dilanjutkan knockout.');
+            $previousMatches = $draw->matches()->whereIn('stage', ['knockout', 'third_place'])->get();
+            $redraw = (bool) ($data['redraw'] ?? false);
+            $version = (int) ($draw->settings['knockout']['version'] ?? 1);
+            if ($previousMatches->isNotEmpty()) {
+                abort_unless($redraw, 422, 'Babak knockout sudah dibuat.');
+                abort_unless((int) $data['knockout_version'] === $version, 422, 'Bagan sudah berubah. Muat ulang sebelum melakukan drawing ulang.');
+                abort_if(!empty($draw->settings['knockout_started_at']) || $previousMatches->contains(fn ($match) => $match->hasPlayEvidence()), 422,
+                    'Drawing ulang tidak dapat dilakukan karena pertandingan knockout sudah dimulai atau memiliki hasil.');
+            } else {
+                abort_if($redraw, 422, 'Babak knockout belum dibuat. Muat ulang halaman.');
+            }
+            $groups = collect($this->groupStandings($draw));
+            abort_if($groups->count() < 2 || $groups->contains(fn ($group) => ! $group['completed'] || count($group['rows']) < 2), 422, 'Selesaikan seluruh pertandingan grup terlebih dahulu.');
+            $qualifiers = $groups->flatMap(fn ($group) => collect($group['rows'])->take(2)->pluck('registration_id'));
+            $size = $this->bracketSize($qualifiers->count());
+            $mode = $data['mode'] ?? 'random';
+
+            if ($mode === 'manual') {
+                $slotIds = array_map(fn ($id) => $id === null ? null : (int) $id, array_values($data['manual_slots']));
+                $selected = collect($slotIds)->filter(fn ($id) => $id !== null);
+                abort_unless(count($slotIds) === $size && $selected->sort()->values()->all() === $qualifiers->sort()->values()->all(), 422,
+                    'Masukkan seluruh tim peringkat 1 dan 2 setiap grup tepat satu kali. Tim lain tidak boleh masuk bagan knockout.');
+                foreach (array_chunk($slotIds, 2) as $pair) {
+                    abort_if($pair[0] === null && $pair[1] === null, 422, 'Setiap pertandingan harus berisi minimal satu tim; BYE tidak boleh melawan BYE.');
+                }
+            } else {
+                // A shuffled cycle guarantees a different group for every runner-up,
+                // without retry loops that can fail for small numbers of groups.
+                $shuffled = $groups->shuffle()->values();
+                $pairs = $shuffled->map(fn ($group, $index) => [
+                    $group['rows'][0]['registration_id'],
+                    $shuffled[($index + 1) % $shuffled->count()]['rows'][1]['registration_id'],
+                ])->shuffle()->values();
+                $splitPairs = (int) (($size - $qualifiers->count()) / 2);
+                $slotIds = [];
+                foreach ($pairs as $index => $pair) {
+                    // Split a pair into two adjacent BYEs when the bracket needs padding.
+                    // Those teams meet in the next round, preserving cross-group pairing.
+                    array_push($slotIds, ...($index < $splitPairs ? [$pair[0], null, $pair[1], null] : $pair));
+                }
+            }
+
+            $participants = Registration::whereIn('id', $qualifiers)->get()->keyBy('id');
+            $slots = array_map(fn ($id) => $id === null ? null : $participants[$id], $slotIds);
+            $settings = $draw->settings ?? [];
+            if ($redraw) {
+                $settings['knockout_history'][] = [
+                    'drawing' => $settings['knockout'] ?? ['version' => $version],
+                    'matches' => $previousMatches->map(fn ($match) => $match->attributesToArray())->all(),
+                    'replaced_by' => $request->user()->id, 'replaced_at' => now()->toIso8601String(),
+                ];
+                $draw->matches()->whereIn('stage', ['knockout', 'third_place'])->delete();
+            }
+            $draw->update(['settings' => array_merge($settings, ['knockout' => [
+                'mode' => $mode, 'slots' => $slotIds, 'version' => $redraw ? $version + 1 : 1,
+                'created_by' => $request->user()->id, 'created_by_name' => $request->user()->name,
+                'created_at' => now()->toIso8601String(),
+            ]])]);
+            $this->createEliminationMatches($draw, $slots, ['third_place' => $draw->settings['third_place'] ?? false], false, 'knockout', (int) $draw->matches()->max('match_number') + 1);
+        });
         return $this->drawPayload($draw->fresh());
     }
 

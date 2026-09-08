@@ -1,14 +1,7 @@
 
-> frontend@0.0.0 dev
-> vite --host 127.0.0.1 --port 5173
-
-
-  VITE v8.1.0  ready in 2696 ms
+  VITE v8.1.0  ready in 2880 ms
 
   ➜  Local:   http://127.0.0.1:5173/
-14.30.06 [vite] (client) hmr update /src/App.jsx, /src/index.css
-14.31.01 [vite] (client) hmr update /src/App.jsx, /src/index.css
-14.31.21 [vite] (client) hmr update /src/App.jsx, /src/index.css
-14.32.26 [vite] (client) hmr update /src/App.jsx, /src/index.css
-14.32.46 [vite] (client) hmr update /src/App.jsx, /src/index.css
-14.33.52 [vite] (client) hmr update /src/App.jsx, /src/index.css
+17.07.10 [vite] (client) hmr update /src/index.css, /src/TournamentManager.jsx
+17.15.34 [vite] (client) hmr update /src/index.css, /src/KnockoutDrawing.jsx
+17.15.35 [vite] (client) hmr update /src/index.css, /src/TournamentManager.jsx
