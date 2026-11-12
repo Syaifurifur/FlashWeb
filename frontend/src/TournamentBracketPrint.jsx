@@ -25,6 +25,61 @@ function printableRounds(draw) {
   }, {})).map(round => round.sort((a, b) => a.match_number - b.match_number))
 }
 
+function splitRounds(allRounds) {
+  if (!allRounds || allRounds.length === 0) return { top: [], bottom: [] }
+  const top = []
+  const bottom = []
+  for (let r = 0; r < allRounds.length; r++) {
+    const round = allRounds[r]
+    if (round.length > 1) {
+      const half = Math.ceil(round.length / 2)
+      top.push(round.slice(0, half))
+      bottom.push(round.slice(half))
+    } else {
+      // Final round dimasukkan ke kedua lembar agar cabang bagan bermuara jelas
+      top.push(round)
+      bottom.push(round)
+    }
+  }
+  return { top, bottom }
+}
+
+function computeLayout(rounds) {
+  if (!rounds || !rounds.length) return null
+  const cardWidth = 196, cardHeight = 56, columnStep = 244
+  const rowStep = Math.min(96, Math.max(68, 560 / Math.max(1, rounds[0].length)))
+
+  const centers = []
+  for (let r = 0; r < rounds.length; r++) {
+    // Jika babak ini 1 match dan babak sebelumnya juga 1 match (misal Final menyambung Semifinal di sub-bagan)
+    if (r > 0 && rounds[r].length === 1 && rounds[r - 1].length === 1) {
+      centers.push([centers[r - 1][0]])
+    } else {
+      centers.push(rounds[r].map((_, m) => (m + 0.5) * rowStep * (2 ** r)))
+    }
+  }
+
+  const width = (rounds.length - 1) * columnStep + cardWidth
+  const height = Math.max(rowStep * rounds[0].length, (centers.at(-1)?.[0] || 0) + cardHeight)
+
+  const paths = []
+  rounds.slice(0, -1).forEach((round, roundIndex) => {
+    round.forEach((match, matchIndex) => {
+      const nextRound = rounds[roundIndex + 1]
+      let targetIndex = nextRound.findIndex(next => next.source_a_match_id === match.id || next.source_b_match_id === match.id)
+      if (targetIndex < 0) targetIndex = Math.min(Math.floor(matchIndex / 2), nextRound.length - 1)
+      const x1 = roundIndex * columnStep + cardWidth
+      const x2 = (roundIndex + 1) * columnStep
+      const y1 = centers[roundIndex][matchIndex]
+      const y2 = centers[roundIndex + 1][targetIndex]
+      const middle = x1 + (x2 - x1) / 2
+      paths.push(`M ${x1} ${y1} H ${middle} V ${y2} H ${x2}`)
+    })
+  })
+
+  return { cardHeight, columnStep, centers, width, height, paths }
+}
+
 function slotName(match, side, roundIndex, matchesById) {
   const participant = side === 'a' ? match.participant_a : match.participant_b
   if (participant) return nameOf(participant)
@@ -85,10 +140,117 @@ function GroupStageSheets({data, printedAt}) {
   </article>)
 }
 
+function KnockoutSheet({
+  data,
+  rounds,
+  section,
+  footerLabel,
+  printedAt,
+  orientation,
+  autoFit,
+  customScale,
+  thirdPlace = null,
+  matchesById,
+}) {
+  const layout = useMemo(() => computeLayout(rounds), [rounds])
+
+  const treeWidth = layout?.width || 0
+  const hasThirdPlace = Boolean(thirdPlace)
+  const treeHeight = layout ? 34 + layout.height + (hasThirdPlace ? 45 : 0) : 0
+
+  // Estimasi ruang kanvas usable di dalam sheet A4 (1mm = 3.78px)
+  // Landscape: 297mm x 210mm (1122.5px x 793.7px) -> usable ~ 1070px x 635px
+  // Portrait:  210mm x 297mm (793.7px x 1122.5px) -> usable ~ 740px x 960px
+  const availWidth = orientation === 'landscape' ? 1070 : 740
+  const availHeight = orientation === 'landscape' ? (hasThirdPlace ? 600 : 635) : (hasThirdPlace ? 925 : 960)
+
+  const autoScale = useMemo(() => {
+    if (!treeWidth || !treeHeight) return 1
+    const s = Math.min(availWidth / treeWidth, availHeight / treeHeight, 1)
+    return Math.max(0.15, Math.floor(s * 1000) / 1000)
+  }, [treeWidth, treeHeight, availWidth, availHeight])
+
+  const currentScale = autoFit || customScale === null ? autoScale : customScale
+
+  return (
+    <article className="bracket-print-sheet bracket-knockout-sheet">
+      <PrintHeader data={data} section={section} />
+      {layout ? (
+        <div className="bracket-scalable-area" style={{ overflow: autoFit ? 'hidden' : 'auto' }}>
+          <div
+            className="bracket-scaled-box"
+            style={{
+              width: Math.round(treeWidth * currentScale),
+              height: Math.round(treeHeight * currentScale),
+            }}
+          >
+            <div
+              className="bracket-tree-canvas"
+              style={{
+                width: treeWidth,
+                height: treeHeight,
+                transform: `scale(${currentScale})`,
+                transformOrigin: 'top left',
+              }}
+            >
+              <div className="bracket-round-headings" style={{ width: layout.width }}>
+                {rounds.map((round, index) => (
+                  <div key={round[0].round_number || index} style={{ left: index * layout.columnStep }}>
+                    {round[0].round_label}
+                  </div>
+                ))}
+              </div>
+              <section className="print-bracket-canvas" style={{ width: layout.width, height: layout.height }}>
+                <svg aria-hidden="true" viewBox={`0 0 ${layout.width} ${layout.height}`} preserveAspectRatio="none">
+                  {layout.paths.map((path, index) => (
+                    <path key={index} d={path} />
+                  ))}
+                </svg>
+                {rounds.flatMap((round, roundIndex) =>
+                  round.map((match, matchIndex) => (
+                    <BracketMatch
+                      key={match.id}
+                      match={match}
+                      roundIndex={roundIndex}
+                      matchesById={matchesById}
+                      style={{
+                        left: roundIndex * layout.columnStep,
+                        top: layout.centers[roundIndex][matchIndex] - layout.cardHeight / 2,
+                      }}
+                    />
+                  ))
+                )}
+              </section>
+              {thirdPlace && (
+                <section className="bracket-third-place">
+                  <span>Perebutan Juara Ketiga</span>
+                  <div>
+                    <b>{slotName(thirdPlace, 'a', 1, matchesById)}</b>
+                    <strong>{scoreOf(thirdPlace.score_a)}</strong>
+                    <b>{slotName(thirdPlace, 'b', 1, matchesById)}</b>
+                    <strong>{scoreOf(thirdPlace.score_b)}</strong>
+                  </div>
+                </section>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <section className="bracket-knockout-empty">
+          <b>Babak knockout belum dibuat</b>
+          <p>Selesaikan seluruh pertandingan grup, lalu buat babak knockout dari panel drawing.</p>
+        </section>
+      )}
+      <PrintFooter printedAt={printedAt} label={footerLabel} />
+    </article>
+  )
+}
+
 export function TournamentBracketPrint({managed = false}) {
   const params = useParams(), location = useLocation(), navigate = useNavigate()
   const [data, setData] = useState(null), [error, setError] = useState('')
   const [orientation, setOrientation] = useState('landscape')
+  const [pageMode, setPageMode] = useState('single') // 'single' atau 'split' (2 lembar)
   const [autoFit, setAutoFit] = useState(true)
   const [customScale, setCustomScale] = useState(null)
 
@@ -102,56 +264,23 @@ export function TournamentBracketPrint({managed = false}) {
     } else {
       endpoint = `/competitions/${params.slug}/tournament${query.get('session_id') ? `?session_id=${query.get('session_id')}` : ''}`
     }
-    api(endpoint).then(setData).catch(requestError => setError(requestError.message))
+    api(endpoint).then(result => {
+      setData(result)
+      const r = printableRounds(result?.draw)
+      // Jika pertandingan awal >= 16 laga (misal 32/64 slot bagan), otomatis gunakan mode 2 lembar agar proporsional dan mudah dibaca
+      if (r[0]?.length >= 16) {
+        setPageMode('split')
+      }
+    }).catch(requestError => setError(requestError.message))
   }, [location.search, managed, params.competitionId, params.sessionId, params.slug])
 
   const rounds = useMemo(() => printableRounds(data?.draw), [data?.draw])
-  const layout = useMemo(() => {
-    if (!rounds.length) return null
-    const cardWidth = 196, cardHeight = 56, columnStep = 244
-    const rowStep = Math.min(96, Math.max(68, 560 / Math.max(1, rounds[0].length)))
-    const centers = rounds.map((round, roundIndex) => round.map((_, matchIndex) => (matchIndex + 0.5) * rowStep * (2 ** roundIndex)))
-    const width = (rounds.length - 1) * columnStep + cardWidth
-    const height = Math.max(rowStep * rounds[0].length, centers.at(-1)?.[0] + cardHeight)
-    const paths = []
-    rounds.slice(0, -1).forEach((round, roundIndex) => {
-      round.forEach((match, matchIndex) => {
-        const nextRound = rounds[roundIndex + 1]
-        let targetIndex = nextRound.findIndex(next => next.source_a_match_id === match.id || next.source_b_match_id === match.id)
-        if (targetIndex < 0) targetIndex = Math.min(Math.floor(matchIndex / 2), nextRound.length - 1)
-        const x1 = roundIndex * columnStep + cardWidth
-        const x2 = (roundIndex + 1) * columnStep
-        const y1 = centers[roundIndex][matchIndex]
-        const y2 = centers[roundIndex + 1][targetIndex]
-        const middle = x1 + (x2 - x1) / 2
-        paths.push(`M ${x1} ${y1} H ${middle} V ${y2} H ${x2}`)
-      })
-    })
-    return {cardHeight, columnStep, centers, width, height, paths}
-  }, [rounds])
+  const canSplit = useMemo(() => (rounds[0]?.length || 0) >= 8, [rounds])
+  const splitData = useMemo(() => splitRounds(rounds), [rounds])
 
   const thirdPlace = data?.draw?.matches?.find(match => match.stage === 'third_place')
   const matchesById = useMemo(() => Object.fromEntries(data?.draw?.matches?.map(match => [match.id, match]) || []), [data?.draw?.matches])
   const printedAt = useMemo(() => new Intl.DateTimeFormat('id-ID', {dateStyle: 'long', timeZone: 'Asia/Jakarta'}).format(new Date()), [])
-
-  // Kalkulasi dimensi tree bagan & ruang yang tersedia pada lembar A4
-  const treeWidth = layout?.width || 0
-  const hasThirdPlace = Boolean(thirdPlace)
-  const treeHeight = layout ? 34 + layout.height + (hasThirdPlace ? 45 : 0) : 0
-
-  // Estimasi ruang kanvas usable di dalam sheet A4 (1mm = 3.78px)
-  // Landscape: 297mm x 210mm (1122.5px x 793.7px) -> ruang isi ~ 1070px x 630px
-  // Portrait:  210mm x 297mm (793.7px x 1122.5px) -> ruang isi ~ 740px x 960px
-  const availWidth = orientation === 'landscape' ? 1070 : 740
-  const availHeight = orientation === 'landscape' ? (hasThirdPlace ? 600 : 635) : (hasThirdPlace ? 925 : 960)
-
-  const autoScale = useMemo(() => {
-    if (!treeWidth || !treeHeight) return 1
-    const s = Math.min(availWidth / treeWidth, availHeight / treeHeight, 1)
-    return Math.max(0.15, Math.floor(s * 1000) / 1000)
-  }, [treeWidth, treeHeight, availWidth, availHeight])
-
-  const currentScale = autoFit || customScale === null ? autoScale : customScale
 
   if (error) return <main className="bracket-print-state"><div><h1>Bagan tidak dapat dibuka</h1><p>{error}</p><button onClick={() => navigate(-1)}>Kembali</button></div></main>
   if (!data) return <main className="bracket-print-state"><div><h1>Menyiapkan bagan…</h1><p>Data pertandingan sedang dimuat.</p></div></main>
@@ -165,10 +294,31 @@ export function TournamentBracketPrint({managed = false}) {
       
       <div className="bracket-print-toolbar-info">
         <b>Pratinjau Cetak Bagan</b>
-        <span>A4 {orientation === 'landscape' ? 'Lanskap' : 'Potret'} · {autoFit ? 'Skala pas 1 lembar utuh' : `Skala manual ${Math.round(currentScale * 100)}%`}</span>
+        <span>
+          A4 {orientation === 'landscape' ? 'Lanskap' : 'Potret'} · {pageMode === 'split' ? '2 Lembar (Bagan Atas & Bawah)' : '1 Lembar Utuh'} · {autoFit ? 'Skala otomatis proporsional' : `Skala manual ${Math.round((customScale || 1) * 100)}%`}
+        </span>
       </div>
 
       <div className="bracket-toolbar-controls">
+        {canSplit && (
+          <div className="bracket-pill-group" role="group" aria-label="Format lembar cetak">
+            <button
+              type="button"
+              className={pageMode === 'single' ? 'selected' : ''}
+              onClick={() => { setPageMode('single'); setCustomScale(null); }}
+            >
+              1 Lembar
+            </button>
+            <button
+              type="button"
+              className={pageMode === 'split' ? 'selected' : ''}
+              onClick={() => { setPageMode('split'); setCustomScale(null); }}
+            >
+              2 Lembar (Atas & Bawah)
+            </button>
+          </div>
+        )}
+
         <div className="bracket-pill-group" role="group" aria-label="Orientasi cetak">
           <button
             type="button"
@@ -192,20 +342,19 @@ export function TournamentBracketPrint({managed = false}) {
             className={autoFit ? 'selected' : ''}
             onClick={() => { setAutoFit(true); setCustomScale(null); }}
           >
-            Pas 1 Lembar
+            Pas Lembar
           </button>
           <button
             type="button"
             title="Perkecil skala"
-            onClick={() => { setAutoFit(false); setCustomScale(Math.max(0.2, (customScale ?? autoScale) - 0.05)); }}
+            onClick={() => { setAutoFit(false); setCustomScale(s => Math.max(0.2, (s ?? 1) - 0.05)); }}
           >
             –
           </button>
-          <span className="bracket-scale-label">{Math.round(currentScale * 100)}%</span>
           <button
             type="button"
             title="Perbesar skala"
-            onClick={() => { setAutoFit(false); setCustomScale(Math.min(2.0, (customScale ?? autoScale) + 0.05)); }}
+            onClick={() => { setAutoFit(false); setCustomScale(s => Math.min(2.0, (s ?? 1) + 0.05)); }}
           >
             +
           </button>
@@ -225,52 +374,47 @@ export function TournamentBracketPrint({managed = false}) {
     </div>
 
     {data.draw.format === 'groups_knockout' && <GroupStageSheets data={data} printedAt={printedAt}/>} 
-    <article className="bracket-print-sheet bracket-knockout-sheet">
-      <PrintHeader data={data} section={data.draw.format === 'groups_knockout' ? 'Bagan Babak Knockout' : 'Bagan Pertandingan Resmi'}/>
-      {layout ? (
-        <div className="bracket-scalable-area" style={{ overflow: autoFit ? 'hidden' : 'auto' }}>
-          <div
-            className="bracket-scaled-box"
-            style={{
-              width: Math.round(treeWidth * currentScale),
-              height: Math.round(treeHeight * currentScale),
-            }}
-          >
-            <div
-              className="bracket-tree-canvas"
-              style={{
-                width: treeWidth,
-                height: treeHeight,
-                transform: `scale(${currentScale})`,
-                transformOrigin: 'top left',
-              }}
-            >
-              <div className="bracket-round-headings" style={{width: layout.width}}>
-                {rounds.map((round, index) => <div key={round[0].round_number} style={{left: index * layout.columnStep}}>{round[0].round_label}</div>)}
-              </div>
-              <section className="print-bracket-canvas" style={{width: layout.width, height: layout.height}}>
-                <svg aria-hidden="true" viewBox={`0 0 ${layout.width} ${layout.height}`} preserveAspectRatio="none">
-                  {layout.paths.map((path, index) => <path key={index} d={path}/>) }
-                </svg>
-                {rounds.flatMap((round, roundIndex) => round.map((match, matchIndex) => <BracketMatch
-                  key={match.id}
-                  match={match}
-                  roundIndex={roundIndex}
-                  matchesById={matchesById}
-                  style={{left: roundIndex * layout.columnStep, top: layout.centers[roundIndex][matchIndex] - layout.cardHeight / 2}}
-                />))}
-              </section>
-              {thirdPlace && <section className="bracket-third-place"><span>Perebutan Juara Ketiga</span><div><b>{slotName(thirdPlace, 'a', 1, matchesById)}</b><strong>{scoreOf(thirdPlace.score_a)}</strong><b>{slotName(thirdPlace, 'b', 1, matchesById)}</b><strong>{scoreOf(thirdPlace.score_b)}</strong></div></section>}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <section className="bracket-knockout-empty">
-          <b>Babak knockout belum dibuat</b>
-          <p>Selesaikan seluruh pertandingan grup, lalu buat babak knockout dari panel drawing. Halaman ini akan otomatis menampilkan tim yang lolos.</p>
-        </section>
-      )}
-      <PrintFooter printedAt={printedAt} label="Bagan pertandingan resmi"/>
-    </article>
+
+    {pageMode === 'split' && canSplit ? (
+      <>
+        <KnockoutSheet
+          data={data}
+          rounds={splitData.top}
+          section={data.draw.format === 'groups_knockout' ? 'Bagan Knockout · Pool Atas' : 'Bagan Pertandingan Resmi · Pool Atas'}
+          footerLabel="Pool Atas (Lembar 1 dari 2)"
+          printedAt={printedAt}
+          orientation={orientation}
+          autoFit={autoFit}
+          customScale={customScale}
+          thirdPlace={null}
+          matchesById={matchesById}
+        />
+        <KnockoutSheet
+          data={data}
+          rounds={splitData.bottom}
+          section={data.draw.format === 'groups_knockout' ? 'Bagan Knockout · Pool Bawah & Final' : 'Bagan Pertandingan Resmi · Pool Bawah & Final'}
+          footerLabel="Pool Bawah & Final (Lembar 2 dari 2)"
+          printedAt={printedAt}
+          orientation={orientation}
+          autoFit={autoFit}
+          customScale={customScale}
+          thirdPlace={thirdPlace}
+          matchesById={matchesById}
+        />
+      </>
+    ) : (
+      <KnockoutSheet
+        data={data}
+        rounds={rounds}
+        section={data.draw.format === 'groups_knockout' ? 'Bagan Babak Knockout' : 'Bagan Pertandingan Resmi'}
+        footerLabel="Bagan pertandingan resmi (1 lembar utuh)"
+        printedAt={printedAt}
+        orientation={orientation}
+        autoFit={autoFit}
+        customScale={customScale}
+        thirdPlace={thirdPlace}
+        matchesById={matchesById}
+      />
+    )}
   </main>
 }

@@ -55,9 +55,10 @@ Setiap perubahan fitur, skema database, API, hak akses, atau alur pengguna wajib
 
 ### 2026-11-13
 
+- Menambahkan pilihan format lembar **1 Lembar** atau **2 Lembar (Pool Atas & Bawah)** pada halaman cetak bagan pertandingan (`TournamentBracketPrint`). Pada turnamen besar ($\ge 16$ laga ronde awal), mode 2 lembar otomatis membagi bagan menjadi Pool Atas (Halaman 1) dan Pool Bawah & Final (Halaman 2) sehingga tulisan dan kartu pertandingan tampil hampir 2× lebih besar, proporsional, dan mudah dibaca saat dicetak.
 - Menambahkan pilihan orientasi cetak **Lanskap** dan **Potret** pada halaman cetak bagan pertandingan (`TournamentBracketPrint`).
-- Menambahkan penskalaan otomatis (*Auto-Fit Scaling*) sehingga seluruh pertandingan pada bagan besar (seperti 40 tim / bracket 64 slot pada Bulutangkis Ganda Putra) dapat tampil utuh dan pas dalam 1 lembar A4 tanpa terpotong.
-- Menambahkan kontrol skala interaktif (`Pas 1 Lembar`, `-`, `+`, `100%`) pada bilah alat pratinjau cetak untuk memudahkan penyesuaian ukuran tampilan dan dokumen cetak/PDF.
+- Menambahkan penskalaan otomatis (*Auto-Fit Scaling*) sehingga seluruh pertandingan pada bagan besar (seperti 40 tim / bracket 64 slot pada Bulutangkis Ganda Putra) dapat tampil utuh dan pas dalam lembar A4 tanpa terpotong.
+- Menambahkan kontrol skala interaktif (`Pas Lembar`, `-`, `+`, `100%`) pada bilah alat pratinjau cetak untuk memudahkan penyesuaian ukuran tampilan dan dokumen cetak/PDF.
 
 ### 2026-09-08
 
