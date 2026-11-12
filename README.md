@@ -53,6 +53,12 @@ Setiap perubahan fitur, skema database, API, hak akses, atau alur pengguna wajib
 
 ## Changelog
 
+### 2026-11-13
+
+- Menambahkan pilihan orientasi cetak **Lanskap** dan **Potret** pada halaman cetak bagan pertandingan (`TournamentBracketPrint`).
+- Menambahkan penskalaan otomatis (*Auto-Fit Scaling*) sehingga seluruh pertandingan pada bagan besar (seperti 40 tim / bracket 64 slot pada Bulutangkis Ganda Putra) dapat tampil utuh dan pas dalam 1 lembar A4 tanpa terpotong.
+- Menambahkan kontrol skala interaktif (`Pas 1 Lembar`, `-`, `+`, `100%`) pada bilah alat pratinjau cetak untuk memudahkan penyesuaian ukuran tampilan dan dokumen cetak/PDF.
+
 ### 2026-09-08
 
 - Menambahkan `FutsalGroupKnockoutDemoSeeder`: versi simulasi baru FUTSAL PUTRA Bogor dengan 16 tim, 4 grup, 24 laga grup selesai, dan bagan 8 tim knockout belum dimulai agar drawing ulang otomatis/manual dapat dicoba. Jalankan dari `backend` dengan `php artisan db:seed --class=FutsalGroupKnockoutDemoSeeder`; membutuhkan 16 peserta `FutsalDemoSeeder` dan mempertahankan versi drawing sebelumnya.
